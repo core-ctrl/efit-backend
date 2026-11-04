@@ -17,6 +17,7 @@ const Registration = require('./models/Registration');
 const Application = require('./models/Application');
 const AuditLog = require('./models/AuditLog');
 const Role = require('./models/Role');
+const EventAssignment = require('./models/EventAssignment');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'efit_secret_key_production_2026';
 
@@ -37,7 +38,30 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Security & Parsing Middleware
-app.use(cors());
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'http://localhost:3000',
+  'http://localhost:3005',
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (
+        allowedOrigins.includes(origin) ||
+        origin.endsWith('.vercel.app') ||
+        process.env.NODE_ENV !== 'production'
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true); // Fallback to ensure seamless Vercel cross-domain functionality
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  })
+);
 app.use(express.json({ limit: '10mb' }));
 
 const INITIAL_DEFAULT_ROLES = [
@@ -68,19 +92,55 @@ async function seedDefaultRoles() {
   }
 }
 
-// MongoDB Connection with Pooling
-if (process.env.MONGODB_URI) {
-  mongoose
-    .connect(process.env.MONGODB_URI, {
-      maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
-    })
-    .then(() => {
-      console.log('Connected securely to MongoDB Cluster');
-      seedDefaultRoles();
-    })
-    .catch((err) => console.error('Failed to connect to MongoDB', err));
+// ─── SERVERLESS MONGOOSE CONNECTION CACHING ───
+let isConnected = false;
+async function connectDB() {
+  if (mongoose.connection.readyState >= 1) {
+    return;
+  }
+  if (!process.env.MONGODB_URI) {
+    console.warn('MONGODB_URI is not configured in environment');
+    return;
+  }
+  await mongoose.connect(process.env.MONGODB_URI, {
+    maxPoolSize: 10,
+    serverSelectionTimeoutMS: 5000,
+  });
+  console.log('Connected securely to MongoDB Cluster');
+  if (!isConnected) {
+    isConnected = true;
+    seedDefaultRoles().catch(() => {});
+  }
 }
+
+// Ensure DB is connected on each incoming serverless invocation
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('Database connection error in middleware:', err);
+    res.status(500).json({ error: 'Database connection failed' });
+  }
+});
+
+// Root Health Endpoints
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ONLINE',
+    service: 'EFIT API Gateway',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'production',
+  });
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'HEALTHY',
+    dbState: mongoose.connection.readyState,
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // ─── AUDIT HELPER ───
 async function recordAudit(action, user, target, status = 'SUCCESS') {
@@ -564,7 +624,25 @@ app.post('/api/auth/google', async (req, res) => {
 // ─── EVENTS (PUBLIC READ, ADMIN WRITE) ───
 app.get('/api/events', async (req, res) => {
   try {
-    const events = await Event.find({}).sort({ date: 1 });
+    const filter = {};
+    if (req.query.club) {
+      if (req.query.club === 'rubix') {
+        filter.$or = [
+          { club: 'rubix' },
+          { organizedBy: { $regex: /rubix/i } },
+          { category: { $regex: /rubix/i } },
+        ];
+      } else if (req.query.club === 'fornix' || req.query.club === 'forensic') {
+        filter.$or = [
+          { club: 'fornix' },
+          { organizedBy: { $regex: /fornix|forensic/i } },
+          { category: { $regex: /fornix|forensic|security|ctf/i } },
+        ];
+      } else {
+        filter.club = req.query.club;
+      }
+    }
+    const events = await Event.find(filter).sort({ date: 1 });
     res.json(events);
   } catch (err) {
     console.error('Error fetching events:', err);
@@ -613,22 +691,41 @@ app.post('/api/events', verifyAdmin, upload.single('image'), async (req, res) =>
       imageUrl = 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=1200&auto=format&fit=crop&q=80';
     }
 
+    // Determine club
+    let club = req.body.club;
+    if (!club) {
+      const org = (req.body.organizedBy || '').toLowerCase();
+      const cat = (req.body.category || '').toLowerCase();
+      if (org.includes('fornix') || org.includes('forensic') || cat.includes('forensic') || cat.includes('ctf')) {
+        club = 'fornix';
+      } else if (org.includes('rubix') || cat.includes('rubix')) {
+        club = 'rubix';
+      } else {
+        club = 'rubix';
+      }
+    }
+
     const eventData = {
       title: req.body.title,
       slug: req.body.title
-        ? req.body.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
+        ? req.body.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') + '-' + Date.now().toString().slice(-4)
         : 'event-' + Date.now(),
       description: req.body.description,
       longDescription: req.body.longDescription || req.body.description,
-      category: req.body.category,
+      club: club,
+      category: req.body.category || 'Workshop',
       date: req.body.date,
-      time: req.body.time,
-      venue: req.body.venue,
-      mode: req.body.mode,
+      time: req.body.time || '10:00 AM',
+      endTime: req.body.endTime || '',
+      venue: req.body.venue || 'KL Campus',
+      mode: req.body.mode || 'Offline',
       image: imageUrl,
-      organizedBy: req.body.organizedBy || 'EFIT Core',
+      organizedBy: req.body.organizedBy || (club === 'fornix' ? 'Fornix Club' : club === 'rubix' ? 'Rubix Club' : 'EFIT Core'),
       registrationOpen: req.body.registrationOpen === 'true' || req.body.registrationOpen === true,
       maxParticipants: Number(req.body.maxParticipants) || 0,
+      reportUrl: req.body.reportUrl || '',
+      reportName: req.body.reportName || '',
+      semester: req.body.semester || '',
     };
 
     const newEvent = new Event(eventData);
@@ -669,6 +766,13 @@ app.put('/api/events/:id', verifyAdmin, upload.single('image'), async (req, res)
       updateData.maxParticipants = Number(updateData.maxParticipants) || 0;
     }
 
+    // Auto-update club if organizedBy changes
+    if (updateData.organizedBy && !updateData.club) {
+      const org = updateData.organizedBy.toLowerCase();
+      if (org.includes('fornix') || org.includes('forensic')) updateData.club = 'fornix';
+      else if (org.includes('rubix')) updateData.club = 'rubix';
+    }
+
     const updated = await Event.findByIdAndUpdate(req.params.id, updateData, { new: true });
     if (!updated) return res.status(404).json({ error: 'Event not found' });
 
@@ -690,6 +794,506 @@ app.delete('/api/events/:id', verifyAdmin, async (req, res) => {
   } catch (err) {
     console.error('Error deleting event:', err);
     res.status(500).json({ error: 'Failed to delete event' });
+  }
+});
+
+// ─── HELPER: COMPUTE STUDENT ASSIGNMENT STATUS ───
+function computeAssignmentStatus(assignment) {
+  if (assignment.status === 'Cancelled') return 'Cancelled';
+  if (assignment.attendance && assignment.attendance !== 'Pending') {
+    return 'Verified';
+  }
+
+  const now = new Date();
+  const dateStr = assignment.assignmentDate || '';
+  if (!dateStr) return 'Assigned';
+
+  let startIso = `${dateStr}T00:00:00`;
+  let endIso = `${dateStr}T23:59:59`;
+
+  if (!assignment.isFullDay && assignment.startTime) {
+    const sMatch = assignment.startTime.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+    if (sMatch) {
+      let h = parseInt(sMatch[1], 10);
+      const m = sMatch[2];
+      const ampm = sMatch[3]?.toUpperCase();
+      if (ampm === 'PM' && h < 12) h += 12;
+      if (ampm === 'AM' && h === 12) h = 0;
+      startIso = `${dateStr}T${h.toString().padStart(2, '0')}:${m}:00`;
+    }
+  }
+
+  if (!assignment.isFullDay && assignment.endTime) {
+    const eMatch = assignment.endTime.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+    if (eMatch) {
+      let h = parseInt(eMatch[1], 10);
+      const m = eMatch[2];
+      const ampm = eMatch[3]?.toUpperCase();
+      if (ampm === 'PM' && h < 12) h += 12;
+      if (ampm === 'AM' && h === 12) h = 0;
+      endIso = `${dateStr}T${h.toString().padStart(2, '0')}:${m}:00`;
+    }
+  }
+
+  const startDate = new Date(startIso);
+  const endDate = new Date(endIso);
+
+  if (!isNaN(startDate.getTime()) && now < startDate) {
+    return 'Upcoming';
+  }
+  if (!isNaN(endDate.getTime()) && now > endDate) {
+    return 'Awaiting Verification';
+  }
+  return 'Ongoing';
+}
+
+// ─── EVENT ASSIGNMENTS & ATTENDANCE MANAGEMENT (ADMIN ONLY) ───
+
+// 1. Get all assigned members for a specific event
+app.get('/api/events/:id/assignments', verifyAdmin, async (req, res) => {
+  try {
+    const assignments = await EventAssignment.find({ eventId: req.params.id })
+      .sort({ assignmentDate: 1, studentName: 1 })
+      .lean();
+
+    const enhanced = assignments.map((a) => ({
+      ...a,
+      calculatedStatus: computeAssignmentStatus(a),
+    }));
+
+    res.json(enhanced);
+  } catch (err) {
+    console.error('Error fetching event assignments:', err);
+    res.status(500).json({ error: 'Failed to fetch assignments' });
+  }
+});
+
+// ─── NON-BLOCKING ASYNCHRONOUS ASSIGNMENT EMAIL NOTIFIER ───
+async function sendAssignmentEmailNotification({ to, studentName, eventTitle, role, date, time, venue, assignmentId }) {
+  if (!to || !to.includes('@')) return;
+  const apiKey = process.env.RESEND_API_KEY || process.env.BREVO_API_KEY;
+  if (!apiKey) {
+    // Graceful skip when email service credentials have not been configured yet
+    return;
+  }
+  try {
+    if (process.env.RESEND_API_KEY) {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: process.env.EMAIL_FROM || 'EFIT Notifications <onboarding@resend.dev>',
+          to: [to],
+          subject: `[EFIT Assignment] Team Duty Assigned: ${eventTitle}`,
+          html: `
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; background: #071426; color: #ffffff;">
+              <div style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 16px; margin-bottom: 20px;">
+                <span style="font-size: 11px; font-family: monospace; text-transform: uppercase; letter-spacing: 0.1em; color: #60a5fa;">EFIT Executive Administration</span>
+                <h2 style="color: #ffffff; margin: 6px 0 0; font-size: 20px; font-weight: bold;">Event Duty Assignment Notice</h2>
+              </div>
+
+              <p style="color: #cbd5e1; font-size: 14px; line-height: 1.5;">Hello <strong style="color: #ffffff;">${studentName}</strong>,</p>
+              <p style="color: #94a3b8; font-size: 13px; line-height: 1.5;">You have been officially assigned by the EFIT Executive team to fulfill the following duty for an upcoming club event:</p>
+
+              <div style="background: rgba(255,255,255,0.04); padding: 18px; border-radius: 12px; margin: 20px 0; border: 1px solid rgba(255,255,255,0.08); font-size: 13px; line-height: 1.6;">
+                <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Event:</span> <strong style="color: #60a5fa;">${eventTitle}</strong></p>
+                <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Assigned Role:</span> <strong style="color: #38bdf8;">${role}</strong></p>
+                <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Date:</span> <strong style="color: #ffffff;">${date}</strong></p>
+                <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Schedule:</span> <strong style="color: #ffffff;">${time}</strong></p>
+                <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Venue:</span> <strong style="color: #ffffff;">${venue}</strong></p>
+              </div>
+
+              <p style="font-size: 12px; color: #64748b; line-height: 1.5;">
+                This assignment has automatically synced to your <strong>Student Portal &rarr; My Tasks</strong> section. Upon event conclusion, your attendance and contribution hours will be reviewed and verified by the club administration.
+              </p>
+
+              <div style="margin-top: 24px; text-align: center;">
+                <a href="https://sac.kluniversity.in/activities" target="_blank" style="background: #2563eb; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 13px; font-weight: 600; display: inline-block; box-shadow: 0 4px 12px rgba(37,99,235,0.3);">
+                  View KL SAC Activities Portal &rarr;
+                </a>
+              </div>
+            </div>
+          `,
+        }),
+      });
+
+      if (assignmentId) {
+        await EventAssignment.findByIdAndUpdate(assignmentId, {
+          emailStatus: response.ok ? 'sent' : 'failed',
+        }).catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.warn(`[Notification] Background email note for ${to}:`, err.message);
+    if (assignmentId) {
+      await EventAssignment.findByIdAndUpdate(assignmentId, { emailStatus: 'failed' }).catch(() => {});
+    }
+  }
+}
+
+// 2. Assign student(s) to an event (Create or Update if already exists)
+app.post('/api/events/:id/assignments', verifyAdmin, async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const {
+      studentId,
+      studentName,
+      studentEmail,
+      assignedRole,
+      assignedTaskDetails,
+      assignmentDate,
+      scheduleType,
+      startTime,
+      endTime,
+      isFullDay,
+    } = req.body;
+
+    if (!studentId || !studentName || !assignedRole || !assignmentDate) {
+      return res.status(400).json({ error: 'Missing required assignment fields' });
+    }
+
+    const payload = {
+      eventId: event._id,
+      eventTitle: event.title,
+      eventSlug: event.slug,
+      club: event.club || (/fornix|forensic/i.test(event.organizedBy || '') ? 'fornix' : 'rubix'),
+      eventPoster: event.image || '',
+      studentId: studentId.trim(),
+      studentName: studentName.trim(),
+      studentEmail: (studentEmail || '').trim(),
+      assignedRole: assignedRole.trim(),
+      assignedTaskDetails: assignedTaskDetails || '',
+      assignmentDate: assignmentDate.trim(),
+      scheduleType: scheduleType || (isFullDay ? 'FULL_DAY' : 'SPECIFIC_SLOT'),
+      startTime: startTime || '09:00 AM',
+      endTime: endTime || '05:00 PM',
+      isFullDay: Boolean(isFullDay),
+    };
+
+    // Upsert to prevent duplicate tasks when admin re-assigns or modifies assignment
+    let assignment = await EventAssignment.findOne({
+      eventId: event._id,
+      studentId: payload.studentId,
+      assignmentDate: payload.assignmentDate,
+    });
+
+    if (assignment) {
+      Object.assign(assignment, payload);
+      await assignment.save();
+      await recordAudit('EVENT_ASSIGNMENT_UPDATED', req.user?.email, `${studentName} in ${event.title}`, 'SUCCESS');
+    } else {
+      payload.status = 'Assigned';
+      payload.attendance = 'Pending';
+      assignment = new EventAssignment(payload);
+      await assignment.save();
+      await recordAudit('EVENT_ASSIGNMENT_CREATED', req.user?.email, `${studentName} assigned to ${event.title}`, 'SUCCESS');
+    }
+
+    // Immediate sub-second HTTP response to UI
+    res.status(201).json({ success: true, assignment });
+
+    // Non-blocking background email dispatch
+    const targetEmail = payload.studentEmail || (payload.studentId.includes('@') ? payload.studentId : `${payload.studentId}@kluniversity.in`);
+    sendAssignmentEmailNotification({
+      to: targetEmail,
+      studentName: payload.studentName,
+      eventTitle: event.title,
+      role: payload.assignedRole,
+      date: payload.assignmentDate,
+      time: payload.isFullDay ? 'Full Day' : `${payload.startTime} – ${payload.endTime}`,
+      venue: event.venue || 'KL Campus',
+      assignmentId: assignment._id,
+    }).catch(() => {});
+  } catch (err) {
+    console.error('Error assigning student to event:', err);
+    res.status(500).json({ error: 'Failed to assign student', details: err.message });
+  }
+});
+
+// 3. Update Attendance & Working Hours (Admin only)
+app.put('/api/assignments/:id/attendance', verifyAdmin, async (req, res) => {
+  try {
+    const assignment = await EventAssignment.findById(req.params.id);
+    if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
+
+    const {
+      attendance,
+      actualParticipationHours,
+      actualTimeDetails,
+      adminRemarks,
+      assignedRole,
+      startTime,
+      endTime,
+      isFullDay,
+    } = req.body;
+
+    const previousAttendance = assignment.attendance;
+    const previousHours = assignment.actualParticipationHours || 0;
+
+    if (attendance) assignment.attendance = attendance;
+    if (actualParticipationHours !== undefined) {
+      assignment.actualParticipationHours = Number(actualParticipationHours) || 0;
+    }
+    if (actualTimeDetails !== undefined) assignment.actualTimeDetails = actualTimeDetails;
+    if (adminRemarks !== undefined) assignment.adminRemarks = adminRemarks;
+    if (assignedRole) assignment.assignedRole = assignedRole;
+    if (startTime) assignment.startTime = startTime;
+    if (endTime) assignment.endTime = endTime;
+    if (isFullDay !== undefined) assignment.isFullDay = Boolean(isFullDay);
+
+    assignment.status = 'Verified';
+    assignment.verifiedBy = req.user?.email || 'Admin';
+    assignment.verifiedAt = new Date();
+
+    assignment.auditLog.push({
+      modifiedBy: req.user?.email || 'Admin',
+      timestamp: new Date(),
+      previousAttendance,
+      updatedAttendance: assignment.attendance,
+      previousHours,
+      updatedHours: assignment.actualParticipationHours,
+      note: adminRemarks || 'Attendance record updated',
+    });
+
+    await assignment.save();
+
+    await recordAudit(
+      'EVENT_ATTENDANCE_RECORDED',
+      req.user?.email,
+      `${assignment.studentName} marked ${assignment.attendance} for ${assignment.eventTitle}`,
+      'SUCCESS'
+    );
+
+    res.json({ success: true, assignment });
+  } catch (err) {
+    console.error('Error updating attendance:', err);
+    res.status(500).json({ error: 'Failed to update attendance' });
+  }
+});
+
+// 4. Delete an event assignment (Admin only)
+app.delete('/api/assignments/:id', verifyAdmin, async (req, res) => {
+  try {
+    const assignment = await EventAssignment.findByIdAndDelete(req.params.id);
+    if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
+
+    await recordAudit(
+      'EVENT_ASSIGNMENT_DELETED',
+      req.user?.email,
+      `${assignment.studentName} assignment deleted for ${assignment.eventTitle}`,
+      'SUCCESS'
+    );
+
+    res.json({ success: true, message: 'Assignment deleted' });
+  } catch (err) {
+    console.error('Error deleting assignment:', err);
+    res.status(500).json({ error: 'Failed to delete assignment' });
+  }
+});
+
+// 5. Search Students from Database (Admin only)
+app.get('/api/students/search', verifyAdmin, async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    const regex = new RegExp(q, 'i');
+
+    const [members, users] = await Promise.all([
+      Member.find({
+        $or: [{ name: regex }, { universityId: regex }, { email: regex }, { id: regex }],
+      })
+        .limit(25)
+        .lean(),
+      User.find({
+        $or: [{ name: regex }, { universityId: regex }, { email: regex }],
+      })
+        .limit(25)
+        .lean(),
+    ]);
+
+    const studentMap = new Map();
+
+    for (const m of members) {
+      const id = m.universityId || m.id;
+      if (id && !studentMap.has(id)) {
+        studentMap.set(id, {
+          studentId: id,
+          name: m.name,
+          email: m.email || `${id}@kluniversity.in`,
+          department: m.category || 'Engineering',
+          role: m.role || 'Member',
+        });
+      }
+    }
+
+    for (const u of users) {
+      const id = u.universityId;
+      if (id && !studentMap.has(id)) {
+        studentMap.set(id, {
+          studentId: id,
+          name: u.name,
+          email: u.email,
+          department: u.department || 'Student',
+          role: u.accountType || 'Student',
+        });
+      }
+    }
+
+    res.json(Array.from(studentMap.values()));
+  } catch (err) {
+    console.error('Error searching students:', err);
+    res.status(500).json({ error: 'Failed to search students' });
+  }
+});
+
+// ─── STUDENT PORTAL TASKS & WORK HISTORY (STRICT STUDENT RBAC) ───
+
+// 6. Get student's assigned tasks
+app.get('/api/portal/tasks', async (req, res) => {
+  try {
+    const studentId = (req.query.studentId || req.user?.universityId || '').trim();
+    if (!studentId) {
+      return res.status(400).json({ error: 'Student ID is required' });
+    }
+
+    const tasks = await EventAssignment.find({ studentId })
+      .sort({ assignmentDate: -1, startTime: -1 })
+      .lean();
+
+    const enhancedTasks = tasks.map((t) => ({
+      ...t,
+      calculatedStatus: computeAssignmentStatus(t),
+    }));
+
+    res.json(enhancedTasks);
+  } catch (err) {
+    console.error('Error fetching student tasks:', err);
+    res.status(500).json({ error: 'Failed to fetch student tasks' });
+  }
+});
+
+// 7. Get student's verified event work history
+app.get('/api/portal/history', async (req, res) => {
+  try {
+    const studentId = (req.query.studentId || req.user?.universityId || '').trim();
+    if (!studentId) {
+      return res.status(400).json({ error: 'Student ID is required' });
+    }
+
+    const history = await EventAssignment.find({
+      studentId,
+      attendance: { $ne: 'Pending' },
+    })
+      .sort({ assignmentDate: -1 })
+      .lean();
+
+    res.json(history);
+  } catch (err) {
+    console.error('Error fetching student work history:', err);
+    res.status(500).json({ error: 'Failed to fetch student history' });
+  }
+});
+
+// 8. Admin Student Contribution Dashboard
+app.get('/api/admin/contributions', verifyAdmin, async (req, res) => {
+  try {
+    const { studentId } = req.query;
+
+    if (studentId) {
+      const assignments = await EventAssignment.find({ studentId: studentId.trim() })
+        .sort({ assignmentDate: -1 })
+        .lean();
+
+      let totalAssigned = assignments.length;
+      let totalAttended = 0;
+      let totalPartiallyAttended = 0;
+      let totalMissed = 0;
+      let totalVerifiedHours = 0;
+      let rubixCount = 0;
+      let fornixCount = 0;
+
+      for (const a of assignments) {
+        if (a.attendance === 'Present') {
+          totalAttended += 1;
+          totalVerifiedHours += a.actualParticipationHours || (a.isFullDay ? 8 : 4);
+        } else if (a.attendance === 'Partially Present') {
+          totalPartiallyAttended += 1;
+          totalVerifiedHours += a.actualParticipationHours || 2;
+        } else if (a.attendance === 'Not Present') {
+          totalMissed += 1;
+        }
+
+        if (a.club === 'fornix') fornixCount += 1;
+        else rubixCount += 1;
+      }
+
+      const studentName = assignments[0]?.studentName || 'Student';
+
+      return res.json({
+        studentId,
+        studentName,
+        totalAssigned,
+        totalAttended,
+        totalPartiallyAttended,
+        totalMissed,
+        totalVerifiedHours,
+        rubixCount,
+        fornixCount,
+        history: assignments.map((a) => ({
+          ...a,
+          calculatedStatus: computeAssignmentStatus(a),
+        })),
+      });
+    }
+
+    // Aggregate contributions across all students
+    const allAssignments = await EventAssignment.find({}).sort({ assignmentDate: -1 }).lean();
+
+    const studentMap = {};
+
+    for (const a of allAssignments) {
+      if (!studentMap[a.studentId]) {
+        studentMap[a.studentId] = {
+          studentId: a.studentId,
+          studentName: a.studentName,
+          studentEmail: a.studentEmail,
+          totalAssigned: 0,
+          totalAttended: 0,
+          totalPartiallyAttended: 0,
+          totalMissed: 0,
+          totalVerifiedHours: 0,
+          rubixCount: 0,
+          fornixCount: 0,
+          recentRole: a.assignedRole,
+          lastActiveDate: a.assignmentDate,
+        };
+      }
+
+      const s = studentMap[a.studentId];
+      s.totalAssigned += 1;
+
+      if (a.attendance === 'Present') {
+        s.totalAttended += 1;
+        s.totalVerifiedHours += a.actualParticipationHours || (a.isFullDay ? 8 : 4);
+      } else if (a.attendance === 'Partially Present') {
+        s.totalPartiallyAttended += 1;
+        s.totalVerifiedHours += a.actualParticipationHours || 2;
+      } else if (a.attendance === 'Not Present') {
+        s.totalMissed += 1;
+      }
+
+      if (a.club === 'fornix') s.fornixCount += 1;
+      else s.rubixCount += 1;
+    }
+
+    res.json(Object.values(studentMap));
+  } catch (err) {
+    console.error('Error fetching student contributions:', err);
+    res.status(500).json({ error: 'Failed to fetch student contributions' });
   }
 });
 
@@ -1248,7 +1852,11 @@ app.put('/api/admin/users/:id/permissions', verifySuperAdmin, async (req, res) =
   }
 });
 
-// Start Server
-app.listen(PORT, () => {
-  console.log(`EFIT API Server running on http://localhost:${PORT}`);
-});
+// Start Server locally, or export app handler for Vercel Serverless Function
+if (process.env.VERCEL !== '1' && process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`EFIT API Server running on http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;

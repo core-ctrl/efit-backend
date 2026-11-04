@@ -10,61 +10,9 @@ async function seed() {
   await mongoose.connect(process.env.MONGODB_URI);
   console.log('Connected to MongoDB for initial seeding.');
 
-  // 1. Events
-  const eventCount = await Event.countDocuments();
-  if (eventCount === 0) {
-    console.log('Seeding initial events...');
-    await Event.insertMany([
-      {
-        title: 'EFIT CodeSprint 2026',
-        slug: 'efit-codesprint-2026',
-        description: 'Annual competitive programming contest challenging problem-solving and algorithmic thinking.',
-        longDescription: 'Join hundreds of talented developers across KL University in our flagship competitive coding championship.',
-        category: 'Hackathon',
-        date: '2026-11-15',
-        time: '10:00 AM',
-        venue: 'Jasmine Hall, KL University',
-        mode: 'Offline',
-        image: 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=1200&auto=format&fit=crop&q=80',
-        organizedBy: 'Technical Wing',
-        registrationOpen: true,
-        maxParticipants: 200,
-      },
-      {
-        title: 'Full-Stack Web3 & Cloud Summit',
-        slug: 'web3-cloud-summit',
-        description: 'Deep dive into decentralized infrastructure, modern microservices, and Kubernetes orchestration.',
-        longDescription: 'A practical, hands-on masterclass conducted by industry leads and senior EFIT alumni.',
-        category: 'Workshop',
-        date: '2026-11-28',
-        time: '02:00 PM',
-        venue: 'New Seminar Hall / Online Stream',
-        mode: 'Hybrid',
-        image: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=1200&auto=format&fit=crop&q=80',
-        organizedBy: 'Technical & Research Wing',
-        registrationOpen: true,
-        maxParticipants: 150,
-      },
-      {
-        title: 'Git, DevOps & Modern Toolchains',
-        slug: 'git-devops-toolchains',
-        description: 'Hands-on practical session covering Git workflows, Docker, CI/CD pipelines, and cloud deployment.',
-        longDescription: 'Get production-ready with best practices for team collaboration, version control, and containerization.',
-        category: 'Workshop',
-        date: '2026-12-05',
-        time: '11:00 AM',
-        venue: 'CS&IT Computer Lab 304',
-        mode: 'Offline',
-        image: 'https://images.unsplash.com/photo-1618401471353-b98afee0b2eb?w=1200&auto=format&fit=crop&q=80',
-        organizedBy: 'Rubix Wing',
-        registrationOpen: true,
-        maxParticipants: 100,
-      }
-    ]);
-    console.log('Events seeded.');
-  } else {
-    console.log(`Events already exist (${eventCount} records). Skipping.`);
-  }
+  // 1. Events: No mock/seed events generated automatically.
+  // Events are managed dynamically exclusively via the Admin Portal.
+
 
   // 2. Notices
   const noticeCount = await Notice.countDocuments();

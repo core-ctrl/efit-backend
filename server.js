@@ -873,46 +873,168 @@ function getEmailTransporter() {
 }
 
 // ─── NON-BLOCKING ASYNCHRONOUS ASSIGNMENT EMAIL NOTIFIER ───
+// Designed with crisp EFIT Deep Navy (#071426 & #0B1F3A) corporate styling — strictly NO neon or glow
 async function sendAssignmentEmailNotification({ to, studentName, eventTitle, role, date, time, venue, assignmentId }) {
   if (!to || !to.includes('@')) return;
 
-  const emailSubject = `[EFIT Duty Assignment] ${eventTitle} — ${role}`;
+  const emailSubject = `[EFIT Official Duty] ${eventTitle} — ${role}`;
   const emailHtml = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; background: #071426; color: #ffffff;">
-      <div style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 16px; margin-bottom: 20px;">
-        <span style="font-size: 11px; font-family: monospace; text-transform: uppercase; letter-spacing: 0.1em; color: #60a5fa;">EFIT Executive Administration</span>
-        <h2 style="color: #ffffff; margin: 6px 0 0; font-size: 20px; font-weight: bold;">Event Duty Assignment Notice</h2>
-      </div>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>${emailSubject}</title>
+    </head>
+    <body style="margin: 0; padding: 32px 12px; background-color: #050B14; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #FFFFFF; -webkit-font-smoothing: antialiased;">
+      <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
+        <tr>
+          <td align="center">
+            <!-- Main Corporate Card Shell -->
+            <table role="presentation" width="100%" style="max-width: 580px; background-color: #071426; border: 1px solid #1E293B; border-radius: 8px; overflow: hidden; text-align: left;" border="0" cellpadding="0" cellspacing="0">
+              
+              <!-- Institutional Top Header -->
+              <tr>
+                <td style="padding: 24px 28px 20px; border-bottom: 1px solid #1E293B; background-color: #0A192F;">
+                  <table width="100%" border="0" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td>
+                        <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.15em; color: #94A3B8; display: block; margin-bottom: 4px;">
+                          Department of Computer Science & Information Technology
+                        </span>
+                        <h1 style="margin: 0; font-size: 17px; font-weight: 700; color: #FFFFFF; letter-spacing: -0.01em;">
+                          EFIT Technical Student Body
+                        </h1>
+                      </td>
+                      <td align="right" valign="top">
+                        <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; padding: 4px 8px; border-radius: 4px; background-color: #1E293B; color: #93C5FD; border: 1px solid #334155;">
+                          Duty Order
+                        </span>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
 
-      <p style="color: #cbd5e1; font-size: 14px; line-height: 1.5;">Hello <strong style="color: #ffffff;">${studentName}</strong>,</p>
-      <p style="color: #94a3b8; font-size: 13px; line-height: 1.5;">You have been officially assigned by the EFIT Executive team to fulfill the following duty for an upcoming club event:</p>
+              <!-- Content Body -->
+              <tr>
+                <td style="padding: 28px;">
+                  <p style="margin: 0 0 12px; font-size: 15px; color: #E2E8F0; line-height: 1.5;">
+                    Dear <strong style="color: #FFFFFF;">${studentName}</strong>,
+                  </p>
+                  <p style="margin: 0 0 24px; font-size: 13px; color: #94A3B8; line-height: 1.6;">
+                    You have been officially assigned by the EFIT Executive Council to execute technical and operational responsibilities for the upcoming club event detailed below:
+                  </p>
 
-      <div style="background: rgba(255,255,255,0.04); padding: 18px; border-radius: 12px; margin: 20px 0; border: 1px solid rgba(255,255,255,0.08); font-size: 13px; line-height: 1.6;">
-        <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Event:</span> <strong style="color: #60a5fa;">${eventTitle}</strong></p>
-        <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Assigned Role:</span> <strong style="color: #38bdf8;">${role}</strong></p>
-        <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Date:</span> <strong style="color: #ffffff;">${date}</strong></p>
-        <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Schedule:</span> <strong style="color: #ffffff;">${time}</strong></p>
-        <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Venue:</span> <strong style="color: #ffffff;">${venue}</strong></p>
-      </div>
+                  <!-- Specification Box -->
+                  <table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #0B1F3A; border: 1px solid #1E3A5F; border-radius: 6px; margin-bottom: 24px;">
+                    <tr>
+                      <td style="padding: 16px 20px; border-bottom: 1px solid #162C4E;">
+                        <span style="font-family: ui-monospace, monospace; font-size: 10px; uppercase; letter-spacing: 0.1em; color: #64748B; display: block; margin-bottom: 2px;">
+                          EVENT
+                        </span>
+                        <span style="font-size: 15px; font-weight: 700; color: #FFFFFF;">
+                          ${eventTitle}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 14px 20px; border-bottom: 1px solid #162C4E;">
+                        <table width="100%" border="0" cellpadding="0" cellspacing="0">
+                          <tr>
+                            <td width="50%">
+                              <span style="font-family: ui-monospace, monospace; font-size: 10px; uppercase; letter-spacing: 0.1em; color: #64748B; display: block; margin-bottom: 2px;">
+                                DESIGNATED RESPONSIBILITY
+                              </span>
+                              <span style="font-size: 13px; font-weight: 600; color: #60A5FA;">
+                                ${role}
+                              </span>
+                            </td>
+                            <td width="50%">
+                              <span style="font-family: ui-monospace, monospace; font-size: 10px; uppercase; letter-spacing: 0.1em; color: #64748B; display: block; margin-bottom: 2px;">
+                                EVENT DATE
+                              </span>
+                              <span style="font-size: 13px; font-weight: 600; color: #FFFFFF;">
+                                ${date}
+                              </span>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 14px 20px;">
+                        <table width="100%" border="0" cellpadding="0" cellspacing="0">
+                          <tr>
+                            <td width="50%">
+                              <span style="font-family: ui-monospace, monospace; font-size: 10px; uppercase; letter-spacing: 0.1em; color: #64748B; display: block; margin-bottom: 2px;">
+                                REPORTING SCHEDULE
+                              </span>
+                              <span style="font-size: 13px; font-weight: 500; color: #CBD5E1;">
+                                ${time}
+                              </span>
+                            </td>
+                            <td width="50%">
+                              <span style="font-family: ui-monospace, monospace; font-size: 10px; uppercase; letter-spacing: 0.1em; color: #64748B; display: block; margin-bottom: 2px;">
+                                VENUE
+                              </span>
+                              <span style="font-size: 13px; font-weight: 500; color: #CBD5E1;">
+                                ${venue}
+                              </span>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+                  </table>
 
-      <p style="font-size: 12px; color: #64748b; line-height: 1.5;">
-        This assignment has automatically synced to your <strong>Student Portal &rarr; My Tasks</strong> section. Upon event conclusion, your attendance and contribution hours will be reviewed and verified by the club administration.
-      </p>
+                  <!-- Instructions & Protocol -->
+                  <div style="padding: 16px; background-color: #061120; border: 1px solid #1E293B; border-radius: 6px; margin-bottom: 28px;">
+                    <span style="font-family: ui-monospace, monospace; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: #94A3B8; display: block; margin-bottom: 6px;">
+                      Operational Protocol
+                    </span>
+                    <ul style="margin: 0; padding-left: 18px; font-size: 12px; color: #94A3B8; line-height: 1.6;">
+                      <li style="margin-bottom: 4px;">Please report directly to the designated venue prior to reporting time.</li>
+                      <li style="margin-bottom: 4px;">This task has automatically synced with your Student Portal under <strong>My Tasks</strong>.</li>
+                      <li>Following event completion, attendance and credited working hours will be verified by the admin team.</li>
+                    </ul>
+                  </div>
 
-      <div style="margin-top: 24px; text-align: center;">
-        <a href="https://sac.kluniversity.in/activities" target="_blank" style="background: #2563eb; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 13px; font-weight: 600; display: inline-block; box-shadow: 0 4px 12px rgba(37,99,235,0.3);">
-          View KL SAC Activities Portal &rarr;
-        </a>
-      </div>
-    </div>
+                  <!-- Direct SAC Link Action -->
+                  <div style="text-align: center;">
+                    <a href="https://sac.kluniversity.in/activities" target="_blank" style="background-color: #1D4ED8; color: #FFFFFF; padding: 11px 24px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 600; display: inline-block; letter-spacing: 0.02em;">
+                      View KL SAC Activity Portal &rarr;
+                    </a>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Clean Institutional Footer -->
+              <tr>
+                <td style="padding: 20px 28px; background-color: #050E1A; border-top: 1px solid #1E293B; text-align: center;">
+                  <p style="margin: 0 0 4px; font-size: 11px; color: #64748B; line-height: 1.4;">
+                    Koneru Lakshmaiah Education Foundation • Student Activity Center (SAC)
+                  </p>
+                  <p style="margin: 0; font-family: ui-monospace, monospace; font-size: 10px; color: #475569; text-transform: uppercase; letter-spacing: 0.08em;">
+                    EFIT Platform Operational Dispatch • Confidential Duty Record
+                  </p>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
   `;
 
   try {
-    // 1. Direct custom SMTP (Gmail / Custom SMTP) - Zero third-party service required
+    // 1. Direct custom SMTP (Gmail / KL Email) - Zero third-party service required
     const smtp = getEmailTransporter();
     if (smtp) {
       await smtp.sendMail({
-        from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+        from: process.env.EMAIL_FROM || process.env.EMAIL_USER || 'EFIT Administration <efit@kluniversity.in>',
         to,
         subject: emailSubject,
         html: emailHtml,
@@ -1119,6 +1241,43 @@ app.delete('/api/assignments/:id', verifyAdmin, async (req, res) => {
   } catch (err) {
     console.error('Error deleting assignment:', err);
     res.status(500).json({ error: 'Failed to delete assignment' });
+  }
+});
+
+// 5. Send/Resend Assignment Notification Card to student (Admin only)
+app.post('/api/assignments/:id/notify', verifyAdmin, async (req, res) => {
+  try {
+    const assignment = await EventAssignment.findById(req.params.id);
+    if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
+
+    const targetEmail =
+      assignment.studentEmail ||
+      (assignment.studentId.includes('@')
+        ? assignment.studentId
+        : `${assignment.studentId}@kluniversity.in`);
+
+    await sendAssignmentEmailNotification({
+      to: targetEmail,
+      studentName: assignment.studentName,
+      eventTitle: assignment.eventTitle,
+      role: assignment.assignedRole,
+      date: assignment.assignmentDate,
+      time: assignment.isFullDay
+        ? 'Full Day Operation'
+        : `${assignment.startTime} – ${assignment.endTime}`,
+      venue: 'KL Campus',
+      assignmentId: assignment._id,
+    });
+
+    const updated = await EventAssignment.findById(assignment._id);
+    res.json({
+      success: true,
+      emailStatus: updated.emailStatus,
+      message: `Notification card dispatched to ${targetEmail}`,
+    });
+  } catch (err) {
+    console.error('Error sending notification card:', err);
+    res.status(500).json({ error: 'Failed to dispatch notification' });
   }
 });
 

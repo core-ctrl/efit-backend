@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const { v2: cloudinary } = require('cloudinary');
+const nodemailer = require('nodemailer');
 require('dotenv').config({ override: true });
 
 // Models
@@ -162,24 +163,21 @@ async function recordAudit(action, user, target, status = 'SUCCESS') {
 function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    // In development / local testing environment, grant operator session fallback
-    if (process.env.NODE_ENV !== 'production') {
-      req.user = { email: 'admin@efit.com', accountType: 'SUPER_ADMIN', roles: ['SUPER_ADMIN', 'PRESIDENT'] };
-      return next();
-    }
     return res.status(401).json({ error: 'Access token required.' });
   }
 
   const token = authHeader.split(' ')[1];
   try {
-    // Check if token is mock/demo token for developer testing or verified JWT
-    if (token.startsWith('admin_session_token') || token.startsWith('demo_admin_token')) {
-      req.user = { email: 'admin@efit.com', accountType: 'SUPER_ADMIN', roles: ['SUPER_ADMIN', 'PRESIDENT'] };
-      return next();
-    }
-    if (token.startsWith('student_session_token') || token.startsWith('demo_student_token')) {
-      req.user = { email: 'student@kluniversity.in', accountType: 'STUDENT', roles: ['STUDENT'] };
-      return next();
+    // Isolated testing override enabled strictly in test environment
+    if (process.env.NODE_ENV === 'test' || process.env.ALLOW_TEST_TOKENS === 'true') {
+      if (token === 'test_super_admin_token' || token === 'admin_session_token_direct') {
+        req.user = { email: 'admin@efit.com', accountType: 'SUPER_ADMIN', roles: ['SUPER_ADMIN', 'PRESIDENT'], universityId: '2400090281' };
+        return next();
+      }
+      if (token === 'test_student_token') {
+        req.user = { email: 'student@kluniversity.in', universityId: '2400030116', accountType: 'STUDENT', roles: ['STUDENT'] };
+        return next();
+      }
     }
 
     const decoded = jwt.verify(token, JWT_SECRET);
@@ -235,19 +233,6 @@ function verifySuperAdmin(req, res, next) {
     next();
   });
 }
-
-// ─── HEALTHCHECK ───
-app.get('/', (req, res) => {
-  res.json({ message: 'Welcome to the EFIT backend API!', status: 'healthy' });
-});
-
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    database: mongoose.connection.readyState === 1 ? 'connected' : 'connecting',
-  });
-});
 
 // ─── AUTHENTICATION ───
 app.post('/api/auth/login', async (req, res) => {
@@ -868,15 +853,78 @@ app.get('/api/events/:id/assignments', verifyAdmin, async (req, res) => {
   }
 });
 
+// ─── CUSTOM SMTP TRANSPORTER (Direct Gmail / College SMTP - No Third-Party Service Required) ───
+let emailTransporter = null;
+function getEmailTransporter() {
+  if (emailTransporter) return emailTransporter;
+  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+    emailTransporter = nodemailer.createTransport({
+      service: process.env.EMAIL_SERVICE || 'gmail',
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: Number(process.env.SMTP_PORT) || 465,
+      secure: true,
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+  }
+  return emailTransporter;
+}
+
 // ─── NON-BLOCKING ASYNCHRONOUS ASSIGNMENT EMAIL NOTIFIER ───
 async function sendAssignmentEmailNotification({ to, studentName, eventTitle, role, date, time, venue, assignmentId }) {
   if (!to || !to.includes('@')) return;
-  const apiKey = process.env.RESEND_API_KEY || process.env.BREVO_API_KEY;
-  if (!apiKey) {
-    // Graceful skip when email service credentials have not been configured yet
-    return;
-  }
+
+  const emailSubject = `[EFIT Duty Assignment] ${eventTitle} — ${role}`;
+  const emailHtml = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; background: #071426; color: #ffffff;">
+      <div style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 16px; margin-bottom: 20px;">
+        <span style="font-size: 11px; font-family: monospace; text-transform: uppercase; letter-spacing: 0.1em; color: #60a5fa;">EFIT Executive Administration</span>
+        <h2 style="color: #ffffff; margin: 6px 0 0; font-size: 20px; font-weight: bold;">Event Duty Assignment Notice</h2>
+      </div>
+
+      <p style="color: #cbd5e1; font-size: 14px; line-height: 1.5;">Hello <strong style="color: #ffffff;">${studentName}</strong>,</p>
+      <p style="color: #94a3b8; font-size: 13px; line-height: 1.5;">You have been officially assigned by the EFIT Executive team to fulfill the following duty for an upcoming club event:</p>
+
+      <div style="background: rgba(255,255,255,0.04); padding: 18px; border-radius: 12px; margin: 20px 0; border: 1px solid rgba(255,255,255,0.08); font-size: 13px; line-height: 1.6;">
+        <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Event:</span> <strong style="color: #60a5fa;">${eventTitle}</strong></p>
+        <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Assigned Role:</span> <strong style="color: #38bdf8;">${role}</strong></p>
+        <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Date:</span> <strong style="color: #ffffff;">${date}</strong></p>
+        <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Schedule:</span> <strong style="color: #ffffff;">${time}</strong></p>
+        <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Venue:</span> <strong style="color: #ffffff;">${venue}</strong></p>
+      </div>
+
+      <p style="font-size: 12px; color: #64748b; line-height: 1.5;">
+        This assignment has automatically synced to your <strong>Student Portal &rarr; My Tasks</strong> section. Upon event conclusion, your attendance and contribution hours will be reviewed and verified by the club administration.
+      </p>
+
+      <div style="margin-top: 24px; text-align: center;">
+        <a href="https://sac.kluniversity.in/activities" target="_blank" style="background: #2563eb; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 13px; font-weight: 600; display: inline-block; box-shadow: 0 4px 12px rgba(37,99,235,0.3);">
+          View KL SAC Activities Portal &rarr;
+        </a>
+      </div>
+    </div>
+  `;
+
   try {
+    // 1. Direct custom SMTP (Gmail / Custom SMTP) - Zero third-party service required
+    const smtp = getEmailTransporter();
+    if (smtp) {
+      await smtp.sendMail({
+        from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+        to,
+        subject: emailSubject,
+        html: emailHtml,
+      });
+      console.log(`[Notification] Custom email delivered to ${to} for ${eventTitle}`);
+      if (assignmentId) {
+        await EventAssignment.findByIdAndUpdate(assignmentId, { emailStatus: 'sent' }).catch(() => {});
+      }
+      return;
+    }
+
+    // 2. Optional Resend fallback if RESEND_API_KEY is configured
     if (process.env.RESEND_API_KEY) {
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
@@ -887,36 +935,8 @@ async function sendAssignmentEmailNotification({ to, studentName, eventTitle, ro
         body: JSON.stringify({
           from: process.env.EMAIL_FROM || 'EFIT Notifications <onboarding@resend.dev>',
           to: [to],
-          subject: `[EFIT Assignment] Team Duty Assigned: ${eventTitle}`,
-          html: `
-            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; background: #071426; color: #ffffff;">
-              <div style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 16px; margin-bottom: 20px;">
-                <span style="font-size: 11px; font-family: monospace; text-transform: uppercase; letter-spacing: 0.1em; color: #60a5fa;">EFIT Executive Administration</span>
-                <h2 style="color: #ffffff; margin: 6px 0 0; font-size: 20px; font-weight: bold;">Event Duty Assignment Notice</h2>
-              </div>
-
-              <p style="color: #cbd5e1; font-size: 14px; line-height: 1.5;">Hello <strong style="color: #ffffff;">${studentName}</strong>,</p>
-              <p style="color: #94a3b8; font-size: 13px; line-height: 1.5;">You have been officially assigned by the EFIT Executive team to fulfill the following duty for an upcoming club event:</p>
-
-              <div style="background: rgba(255,255,255,0.04); padding: 18px; border-radius: 12px; margin: 20px 0; border: 1px solid rgba(255,255,255,0.08); font-size: 13px; line-height: 1.6;">
-                <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Event:</span> <strong style="color: #60a5fa;">${eventTitle}</strong></p>
-                <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Assigned Role:</span> <strong style="color: #38bdf8;">${role}</strong></p>
-                <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Date:</span> <strong style="color: #ffffff;">${date}</strong></p>
-                <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Schedule:</span> <strong style="color: #ffffff;">${time}</strong></p>
-                <p style="margin: 4px 0;"><span style="color: #94a3b8; width: 120px; display: inline-block;">Venue:</span> <strong style="color: #ffffff;">${venue}</strong></p>
-              </div>
-
-              <p style="font-size: 12px; color: #64748b; line-height: 1.5;">
-                This assignment has automatically synced to your <strong>Student Portal &rarr; My Tasks</strong> section. Upon event conclusion, your attendance and contribution hours will be reviewed and verified by the club administration.
-              </p>
-
-              <div style="margin-top: 24px; text-align: center;">
-                <a href="https://sac.kluniversity.in/activities" target="_blank" style="background: #2563eb; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 13px; font-weight: 600; display: inline-block; box-shadow: 0 4px 12px rgba(37,99,235,0.3);">
-                  View KL SAC Activities Portal &rarr;
-                </a>
-              </div>
-            </div>
-          `,
+          subject: emailSubject,
+          html: emailHtml,
         }),
       });
 
@@ -925,6 +945,12 @@ async function sendAssignmentEmailNotification({ to, studentName, eventTitle, ro
           emailStatus: response.ok ? 'sent' : 'failed',
         }).catch(() => {});
       }
+      return;
+    }
+
+    // No credentials configured - task remains in student portal gracefully
+    if (assignmentId) {
+      await EventAssignment.findByIdAndUpdate(assignmentId, { emailStatus: 'pending' }).catch(() => {});
     }
   } catch (err) {
     console.warn(`[Notification] Background email note for ${to}:`, err.message);

@@ -16,5 +16,8 @@ const UserSchema = new mongoose.Schema({
   customPermissions: { type: Object, default: {} }
 }, { timestamps: true });
 
+UserSchema.index({ universityId: 1, name: 1 });
+UserSchema.index({ accountType: 1, status: 1 });
+
 module.exports = mongoose.model('User', UserSchema);
 

@@ -13,6 +13,7 @@ const memberSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 memberSchema.index({ universityId: 1, id: 1 });
+memberSchema.index({ name: 1, universityId: 1 });
 memberSchema.index({ category: 1, role: 1 });
 
 module.exports = mongoose.models.Member || mongoose.model('Member', memberSchema);

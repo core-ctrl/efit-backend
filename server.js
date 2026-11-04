@@ -28,10 +28,10 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Multer config with 10MB memory safety limits to prevent OOM denial-of-service
+// Multer config optimized for Vercel 4.5MB Serverless Payload Limits
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 4 * 1024 * 1024 }, // 4MB safe limit for Vercel
 });
 
 const app = express();

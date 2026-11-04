@@ -857,15 +857,19 @@ app.get('/api/events/:id/assignments', verifyAdmin, async (req, res) => {
 let emailTransporter = null;
 function getEmailTransporter() {
   if (emailTransporter) return emailTransporter;
-  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  const user = process.env.SMTP_USER || process.env.GMAIL_USER || process.env.EMAIL_USER;
+  const pass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || process.env.EMAIL_PASS;
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const port = Number(process.env.SMTP_PORT) || 587;
+
+  if (user && pass) {
     emailTransporter = nodemailer.createTransport({
-      service: process.env.EMAIL_SERVICE || 'gmail',
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: Number(process.env.SMTP_PORT) || 465,
-      secure: true,
+      host,
+      port,
+      secure: port === 465, // true for 465, false for 587 STARTTLS
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+        user,
+        pass,
       },
     });
   }
@@ -1033,13 +1037,19 @@ async function sendAssignmentEmailNotification({ to, studentName, eventTitle, ro
     // 1. Direct custom SMTP (Gmail / KL Email) - Zero third-party service required
     const smtp = getEmailTransporter();
     if (smtp) {
+      const user = process.env.SMTP_USER || process.env.GMAIL_USER || process.env.EMAIL_USER;
+      const fromName = process.env.EMAIL_FROM_NAME || 'EFIT Technical Student Body - KL University';
+      const fromHeader = `"${fromName}" <${user}>`;
+      const replyTo = process.env.EMAIL_REPLY_TO || 'efit@kluniversity.in';
+
       await smtp.sendMail({
-        from: process.env.EMAIL_FROM || process.env.EMAIL_USER || 'EFIT Administration <efit@kluniversity.in>',
+        from: fromHeader,
+        replyTo,
         to,
         subject: emailSubject,
         html: emailHtml,
       });
-      console.log(`[Notification] Custom email delivered to ${to} for ${eventTitle}`);
+      console.log(`[Notification] Custom email delivered to ${to} for ${eventTitle} (From: ${fromName})`);
       if (assignmentId) {
         await EventAssignment.findByIdAndUpdate(assignmentId, { emailStatus: 'sent' }).catch(() => {});
       }

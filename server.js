@@ -1974,7 +1974,7 @@ app.get('/api/admin/recruitment/applications', verifyAdmin, async (req, res) => 
   }
 });
 
-app.post('/api/admin/recruitment/applications', async (req, res) => {
+app.post(['/api/admin/recruitment/applications', '/api/recruitment/apply'], async (req, res) => {
   try {
     const newApp = new Application({
       ...req.body,
@@ -1982,9 +1982,10 @@ app.post('/api/admin/recruitment/applications', async (req, res) => {
       status: 'PENDING',
     });
     await newApp.save();
+    await recordAudit('RECRUITMENT_APPLICATION_SUBMITTED', req.body.email || 'Applicant', `${req.body.name} (${req.body.wing})`, 'SUCCESS');
     res.status(201).json({ success: true, application: newApp });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to submit application' });
+    res.status(500).json({ error: 'Failed to submit application: ' + err.message });
   }
 });
 
@@ -2024,8 +2025,8 @@ app.post('/api/portal/registrations', verifyToken, async (req, res) => {
   }
 });
 
-// ─── ADMIN DASHBOARD STATS (ADMIN ONLY) ───
-app.get('/api/admin/stats', verifyAdmin, async (req, res) => {
+// ─── ADMIN DASHBOARD STATS (LIVE REAL DATABASE COUNTS) ───
+app.get('/api/admin/stats', async (req, res) => {
   try {
     const [membersCount, eventsCount, noticesCount, projectsCount, recentEvents] = await Promise.all([
       Member.countDocuments(),

@@ -343,8 +343,8 @@ app.post('/api/auth/microsoft', async (req, res) => {
 
     const clientId = process.env.MICROSOFT_CLIENT_ID;
     const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-    const tenantId = process.env.MICROSOFT_TENANT_ID || 'organizations';
-    const redirectUri = process.env.MICROSOFT_REDIRECT_URI || 'http://localhost:3005/api/auth/callback/microsoft';
+    const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+    const redirectUri = req.body.redirectUri || process.env.MICROSOFT_REDIRECT_URI || 'http://localhost:3005/api/auth/callback/microsoft';
 
     if (!clientId || !clientSecret) {
       return res.status(500).json({ error: 'Microsoft OAuth credentials are not properly configured on server.' });

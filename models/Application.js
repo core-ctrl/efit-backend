@@ -7,6 +7,9 @@ const ApplicationSchema = new mongoose.Schema({
   wing: { type: String, required: true },
   role: { type: String, required: true },
   cgpa: { type: String, default: '8.5' },
+  portfolioUrl: { type: String, default: '' },
+  statement: { type: String, default: '' },
+  agreedToTerms: { type: Boolean, default: true },
   status: {
     type: String,
     enum: ['PENDING', 'INTERVIEWED', 'ACCEPTED', 'REJECTED'],

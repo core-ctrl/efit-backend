@@ -1535,10 +1535,33 @@ app.get('/api/team/:id', async (req, res) => {
   }
 });
 
-app.post('/api/team', verifyAdmin, async (req, res) => {
+app.post('/api/team', verifyAdmin, upload.single('image'), async (req, res) => {
   try {
+    let imageUrl = req.body.image || '';
+    if (req.file) {
+      try {
+        imageUrl = await new Promise((resolve, reject) => {
+          cloudinary.uploader
+            .upload_stream(
+              {
+                folder: 'efit_team',
+                transformation: [{ width: 800, height: 1000, crop: 'limit' }],
+              },
+              (error, result) => {
+                if (error) reject(error);
+                else resolve(result?.secure_url || '');
+              }
+            )
+            .end(req.file.buffer);
+        });
+      } catch (cloudErr) {
+        console.warn('Cloudinary team member photo upload warning:', cloudErr.message || cloudErr);
+      }
+    }
+
     const member = new Member({
       ...req.body,
+      image: imageUrl || req.body.image || '',
       id: req.body.id || req.body.universityId || Date.now().toString(),
     });
     await member.save();
@@ -1551,8 +1574,33 @@ app.post('/api/team', verifyAdmin, async (req, res) => {
   }
 });
 
-app.put('/api/team/:id', verifyAdmin, async (req, res) => {
+app.put('/api/team/:id', verifyAdmin, upload.single('image'), async (req, res) => {
   try {
+    let updateData = { ...req.body };
+    if (req.file) {
+      try {
+        const uploadResult = await new Promise((resolve, reject) => {
+          cloudinary.uploader
+            .upload_stream(
+              {
+                folder: 'efit_team',
+                transformation: [{ width: 800, height: 1000, crop: 'limit' }],
+              },
+              (error, result) => {
+                if (error) reject(error);
+                else resolve(result?.secure_url || '');
+              }
+            )
+            .end(req.file.buffer);
+        });
+        if (uploadResult) {
+          updateData.image = uploadResult;
+        }
+      } catch (cloudErr) {
+        console.warn('Cloudinary team member photo upload warning:', cloudErr.message || cloudErr);
+      }
+    }
+
     const updated = await Member.findOneAndUpdate(
       {
         $or: [
@@ -1561,16 +1609,88 @@ app.put('/api/team/:id', verifyAdmin, async (req, res) => {
           { universityId: req.params.id },
         ],
       },
-      req.body,
+      updateData,
       { new: true }
     );
     if (!updated) return res.status(404).json({ error: 'Member not found' });
 
-    await recordAudit('MEMBER_UPDATED', req.user?.email, updated.name, 'SUCCESS');
+    // Sync User avatar if registered
+    if (updateData.image) {
+      await User.updateOne(
+        {
+          $or: [
+            { universityId: updated.universityId },
+            { email: new RegExp(`^${updated.email}$`, 'i') },
+          ],
+        },
+        { $set: { image: updateData.image } }
+      ).catch(() => {});
+    }
+
+    await recordAudit('MEMBER_UPDATED', req.user?.email, `${updated.name} (${updated.role})`, 'SUCCESS');
     res.json({ success: true, member: updated });
   } catch (err) {
     console.error('Error updating member:', err);
     res.status(500).json({ error: 'Failed to update member' });
+  }
+});
+
+// Dedicated Instant Member Photo Upload
+app.post('/api/team/:id/photo', verifyAdmin, upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No image file uploaded' });
+    }
+
+    const uploadResult = await new Promise((resolve, reject) => {
+      cloudinary.uploader
+        .upload_stream(
+          {
+            folder: 'efit_team',
+            transformation: [{ width: 800, height: 1000, crop: 'limit' }],
+          },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result?.secure_url || '');
+          }
+        )
+        .end(req.file.buffer);
+    });
+
+    if (!uploadResult) {
+      return res.status(500).json({ error: 'Cloudinary upload failed' });
+    }
+
+    const updated = await Member.findOneAndUpdate(
+      {
+        $or: [
+          { _id: mongoose.Types.ObjectId.isValid(req.params.id) ? req.params.id : null },
+          { id: req.params.id },
+          { universityId: req.params.id },
+        ],
+      },
+      { image: uploadResult },
+      { new: true }
+    );
+
+    if (!updated) return res.status(404).json({ error: 'Member not found' });
+
+    // Sync with User model if user account exists
+    await User.updateOne(
+      {
+        $or: [
+          { universityId: updated.universityId },
+          { email: new RegExp(`^${updated.email}$`, 'i') },
+        ],
+      },
+      { $set: { image: uploadResult } }
+    ).catch(() => {});
+
+    await recordAudit('MEMBER_PHOTO_UPDATED', req.user?.email, updated.name, 'SUCCESS');
+    res.json({ success: true, image: uploadResult, member: updated });
+  } catch (err) {
+    console.error('Error uploading member photo:', err);
+    res.status(500).json({ error: err.message || 'Failed to upload photo' });
   }
 });
 

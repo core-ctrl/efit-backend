@@ -24,7 +24,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'efit_secret_key_production_2026';
 
 // Cloudinary config
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'jjwsbsaj',
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
@@ -1555,7 +1555,8 @@ app.post('/api/team', verifyAdmin, upload.single('image'), async (req, res) => {
             .end(req.file.buffer);
         });
       } catch (cloudErr) {
-        console.warn('Cloudinary team member photo upload warning:', cloudErr.message || cloudErr);
+        console.error('Cloudinary team member photo upload error:', cloudErr);
+        return res.status(500).json({ error: 'Cloudinary photo upload failed: ' + (cloudErr.message || 'unknown error') });
       }
     }
 
@@ -1597,7 +1598,8 @@ app.put('/api/team/:id', verifyAdmin, upload.single('image'), async (req, res) =
           updateData.image = uploadResult;
         }
       } catch (cloudErr) {
-        console.warn('Cloudinary team member photo upload warning:', cloudErr.message || cloudErr);
+        console.error('Cloudinary team member photo upload error:', cloudErr);
+        return res.status(500).json({ error: 'Cloudinary photo upload failed: ' + (cloudErr.message || 'unknown error') });
       }
     }
 

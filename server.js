@@ -22,6 +22,23 @@ const EventAssignment = require('./models/EventAssignment');
 const Media = require('./models/Media');
 
 const { Readable } = require('stream');
+const crypto = require('crypto');
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedPassword) {
+  if (!storedPassword) return false;
+  if (!storedPassword.includes(':')) {
+    return password === storedPassword;
+  }
+  const [salt, hash] = storedPassword.split(':');
+  const checkHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+  return hash === checkHash;
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || 'efit_secret_key_production_2026';
 
@@ -327,6 +344,21 @@ app.post('/api/auth/login', async (req, res) => {
       ],
     });
 
+    // Verify password if user has password set; if not set yet, guide them to Microsoft login
+    if (!dbUser || !dbUser.password) {
+      return res.status(400).json({
+        error:
+          'No password set for this account yet. First, please sign in with your college Microsoft account (@kluniversity.in) above. Once logged in, go to your Profile and set a password to enable direct password login.',
+      });
+    }
+
+    if (!verifyPassword(password, dbUser.password)) {
+      return res.status(401).json({
+        error:
+          'Invalid password. If you forgot your password, please sign in with your college Microsoft account (@kluniversity.in) above.',
+      });
+    }
+
     let computedType = dbUser?.accountType || (memberRecord ? 'MEMBER' : 'STUDENT');
     let computedRoles = dbUser?.roles?.length ? dbUser.roles : ['STUDENT'];
 
@@ -375,6 +407,51 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Authentication failed.' });
+  }
+});
+
+// Dedicated endpoint for authenticated students to set / update their direct login password
+app.post('/api/auth/set-password', verifyToken, async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+    }
+
+    const universityId = req.user?.universityId || req.user?.id;
+    const email = (req.user?.email || '').toLowerCase().trim();
+
+    if (!universityId && !email) {
+      return res.status(400).json({ error: 'User identity could not be verified from token.' });
+    }
+
+    const hashedPassword = hashPassword(password);
+
+    const updatedUser = await User.findOneAndUpdate(
+      {
+        $or: [
+          { universityId: new RegExp(`^${universityId}$`, 'i') },
+          { email: new RegExp(`^${email}$`, 'i') },
+        ],
+      },
+      {
+        $set: {
+          password: hashedPassword,
+          hasPasswordSet: true,
+          authProvider: 'CREDENTIALS',
+        },
+      },
+      { new: true, upsert: true }
+    );
+
+    await recordAudit('PASSWORD_SET', email, `Password configured by ${universityId}`, 'SUCCESS');
+    res.json({
+      success: true,
+      message: 'Portal password updated successfully! You can now log in using your Student ID/Email and password anytime.',
+    });
+  } catch (err) {
+    console.error('Error setting password:', err);
+    res.status(500).json({ error: 'Failed to update password: ' + err.message });
   }
 });
 

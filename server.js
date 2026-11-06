@@ -2290,6 +2290,23 @@ app.put('/api/admin/users/:id/permissions', verifySuperAdmin, async (req, res) =
   }
 });
 
+// Global error handling middleware (handles Multer errors gracefully)
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        error: 'File exceeds 4MB server limit. The frontend image optimizer automatically compresses images, or please pick a smaller file.',
+      });
+    }
+    return res.status(400).json({ error: 'File upload error: ' + err.message });
+  }
+  if (err) {
+    console.error('Unhandled server error:', err);
+    return res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+  next();
+});
+
 // Start Server locally, or export app handler for Vercel Serverless Function
 if (process.env.VERCEL !== '1' && process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {

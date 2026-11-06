@@ -81,6 +81,7 @@ const INITIAL_DEFAULT_ROLES = [
   { name: 'Logistics - Director', tier: 'DIRECTOR', department: 'Logistics', clearance: 'MEMBER', isSystem: true, description: 'Event Venues, Equipment & Ground Coordination' },
   { name: 'Technical Director', tier: 'DIRECTOR', department: 'Technical', clearance: 'MEMBER', isSystem: true, description: 'Full Stack Engineering, Cloud Infra & Architecture' },
   { name: 'Technical Lead', tier: 'LEAD', department: 'Technical', clearance: 'MEMBER', isSystem: true, description: 'Squad Code Reviews, Git Management & Workshops' },
+  { name: 'Coordinator', tier: 'COORDINATOR', department: 'Coordinators', clearance: 'MEMBER', isSystem: true, description: 'General Club Coordinator & Ground Operations' },
   { name: 'Event Coordinator', tier: 'COORDINATOR', department: 'Events', clearance: 'MEMBER', isSystem: true, description: 'Participant Check-in & Arena Operations' },
   { name: 'Core Member', tier: 'MEMBER', department: 'General', clearance: 'MEMBER', isSystem: true, description: 'Active Contributor & Project Squad Member' },
 ];

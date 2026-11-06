@@ -19,6 +19,7 @@ const Application = require('./models/Application');
 const AuditLog = require('./models/AuditLog');
 const Role = require('./models/Role');
 const EventAssignment = require('./models/EventAssignment');
+const Media = require('./models/Media');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'efit_secret_key_production_2026';
 
@@ -1837,7 +1838,7 @@ app.delete('/api/roles/:id', verifySuperAdmin, async (req, res) => {
 });
 
 // ─── NOTICES (PUBLIC READ, ADMIN WRITE) ───
-app.get('/api/notices', async (req, res) => {
+app.get(['/api/notices', '/api/admin/notices'], async (req, res) => {
   try {
     const notices = await Notice.find({}).sort({ createdAt: -1 });
     res.json(notices);
@@ -1847,7 +1848,7 @@ app.get('/api/notices', async (req, res) => {
   }
 });
 
-app.post('/api/notices', verifyAdmin, async (req, res) => {
+app.post(['/api/notices', '/api/admin/notices'], verifyAdmin, async (req, res) => {
   try {
     const notice = new Notice(req.body);
     await notice.save();
@@ -1860,7 +1861,7 @@ app.post('/api/notices', verifyAdmin, async (req, res) => {
   }
 });
 
-app.delete('/api/notices/:id', verifyAdmin, async (req, res) => {
+app.delete(['/api/notices/:id', '/api/admin/notices/:id'], verifyAdmin, async (req, res) => {
   try {
     const deleted = await Notice.findByIdAndDelete(req.params.id);
     if (deleted) {
@@ -1868,7 +1869,111 @@ app.delete('/api/notices/:id', verifyAdmin, async (req, res) => {
     }
     res.json({ success: true, message: 'Notice deleted' });
   } catch (err) {
+    console.error('Error deleting notice:', err);
     res.status(500).json({ error: 'Failed to delete notice' });
+  }
+});
+
+// ─── MEDIA ASSETS (PERSISTED IN MONGODB ATLAS) ───
+const DEFAULT_MEDIA_ITEMS = [
+  {
+    title: 'KL Tech Hackathon Keynote Hall',
+    category: 'Chronicles',
+    url: 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800&auto=format&fit=crop&q=80',
+    uploadedAt: '2026-10-10',
+  },
+  {
+    title: 'EFIT Executive Inauguration Ceremony',
+    category: 'Chronicles',
+    url: 'https://images.unsplash.com/photo-1511578314322-379afb476865?w=800&auto=format&fit=crop&q=80',
+    uploadedAt: '2026-10-08',
+  },
+  {
+    title: 'Rubix Engineering Division Workshop',
+    category: 'Event Posters',
+    url: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800&auto=format&fit=crop&q=80',
+    uploadedAt: '2026-10-05',
+  },
+  {
+    title: 'Forensic Wing Cybersecurity CTF',
+    category: 'Event Posters',
+    url: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800&auto=format&fit=crop&q=80',
+    uploadedAt: '2026-10-02',
+  },
+  {
+    title: 'Official EFIT Monogram Mark',
+    category: 'Branding',
+    url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80',
+    uploadedAt: '2026-09-28',
+  },
+];
+
+app.get(['/api/media', '/api/admin/media'], async (req, res) => {
+  try {
+    let items = await Media.find({}).sort({ createdAt: -1 });
+    if (items.length === 0) {
+      const seeded = await Media.insertMany(DEFAULT_MEDIA_ITEMS);
+      return res.json(seeded);
+    }
+    res.json(items);
+  } catch (err) {
+    console.error('Error fetching media:', err);
+    res.status(500).json({ error: 'Failed to fetch media assets' });
+  }
+});
+
+app.post(['/api/media', '/api/admin/media'], verifyAdmin, upload.single('file'), async (req, res) => {
+  try {
+    let imageUrl = req.body.url;
+    let publicId = '';
+
+    if (req.file) {
+      try {
+        imageUrl = await new Promise((resolve, reject) => {
+          cloudinary.uploader
+            .upload_stream({ folder: 'efit_media_gallery' }, (error, result) => {
+              if (error) reject(error);
+              else resolve(result?.secure_url || '');
+            })
+            .end(req.file.buffer);
+        });
+      } catch (cloudErr) {
+        console.warn('Media upload Cloudinary note:', cloudErr.message || cloudErr);
+      }
+    }
+
+    if (!imageUrl) {
+      return res.status(400).json({ error: 'Image file or URL is required' });
+    }
+
+    const newMedia = new Media({
+      title: req.body.title || 'Untitled Asset',
+      category: req.body.category || 'Chronicles',
+      url: imageUrl,
+      publicId: publicId || req.body.publicId || '',
+      uploadedAt: new Date().toISOString().split('T')[0],
+    });
+
+    await newMedia.save();
+    await recordAudit('MEDIA_ASSET_UPLOADED', req.user?.email, newMedia.title, 'SUCCESS');
+    res.status(201).json({ success: true, media: newMedia });
+  } catch (err) {
+    console.error('Error uploading media:', err);
+    res.status(500).json({ error: 'Failed to save media asset: ' + err.message });
+  }
+});
+
+app.delete(['/api/media/:id', '/api/admin/media/:id'], verifyAdmin, async (req, res) => {
+  try {
+    const deleted = await Media.findByIdAndDelete(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: 'Media asset not found in database' });
+    }
+    await recordAudit('MEDIA_ASSET_DELETED', req.user?.email, deleted.title, 'SUCCESS');
+    res.json({ success: true, message: 'Media asset permanently deleted', id: req.params.id });
+  } catch (err) {
+    console.error('Error deleting media:', err);
+    res.status(500).json({ error: 'Failed to delete media asset' });
   }
 });
 

@@ -42,6 +42,8 @@ const PORT = process.env.PORT || 4000;
 // Security & Parsing Middleware
 const allowedOrigins = [
   process.env.FRONTEND_URL,
+  'https://klefit.in',
+  'https://www.klefit.in',
   'http://localhost:3000',
   'http://localhost:3005',
 ].filter(Boolean);
@@ -53,6 +55,7 @@ app.use(
       if (
         allowedOrigins.includes(origin) ||
         origin.endsWith('.vercel.app') ||
+        origin.endsWith('klefit.in') ||
         process.env.NODE_ENV !== 'production'
       ) {
         return callback(null, true);

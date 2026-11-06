@@ -21,14 +21,43 @@ const Role = require('./models/Role');
 const EventAssignment = require('./models/EventAssignment');
 const Media = require('./models/Media');
 
+const { Readable } = require('stream');
+
 const JWT_SECRET = process.env.JWT_SECRET || 'efit_secret_key_production_2026';
 
-// Cloudinary config
+// Cloudinary config with 60s timeout
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'jjwsbsaj',
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
+  timeout: 60000,
 });
+
+/**
+ * Robust stream pipe uploader to Cloudinary
+ * Replaces .end(buffer) with Readable.from(buffer).pipe(stream)
+ * preventing hung duplex streams and timeouts
+ */
+function uploadBufferToCloudinary(buffer, folder = 'efit_uploads', options = {}) {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: 'image',
+        ...options,
+      },
+      (error, result) => {
+        if (error) {
+          console.error('Cloudinary stream error:', error.message || error);
+          reject(error);
+        } else {
+          resolve(result?.secure_url || '');
+        }
+      }
+    );
+    Readable.from(buffer).pipe(uploadStream);
+  });
+}
 
 // Multer config optimized for Vercel 4.5MB Serverless Payload Limits
 const upload = multer({
@@ -672,16 +701,9 @@ app.post('/api/events', verifyAdmin, upload.single('image'), async (req, res) =>
     let imageUrl = req.body.image || '';
     if (req.file) {
       try {
-        imageUrl = await new Promise((resolve, reject) => {
-          cloudinary.uploader
-            .upload_stream({ folder: 'efit_events' }, (error, result) => {
-              if (error) reject(error);
-              else resolve(result?.secure_url || '');
-            })
-            .end(req.file.buffer);
-        });
+        imageUrl = await uploadBufferToCloudinary(req.file.buffer, 'efit_events');
       } catch (cloudErr) {
-        console.warn('Notice: Cloudinary upload returned error (check CLOUDINARY_CLOUD_NAME):', cloudErr.message || cloudErr);
+        console.warn('Notice: Cloudinary upload returned error:', cloudErr.message || cloudErr);
         if (!imageUrl) {
           imageUrl = 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=1200&auto=format&fit=crop&q=80';
         }
@@ -745,15 +767,8 @@ app.put('/api/events/:id', verifyAdmin, upload.single('image'), async (req, res)
     let updateData = { ...req.body };
     if (req.file) {
       try {
-        const imageUrl = await new Promise((resolve, reject) => {
-          cloudinary.uploader
-            .upload_stream({ folder: 'efit_events' }, (error, result) => {
-              if (error) reject(error);
-              else resolve(result?.secure_url || '');
-            })
-            .end(req.file.buffer);
-        });
-        updateData.image = imageUrl;
+        const imageUrl = await uploadBufferToCloudinary(req.file.buffer, 'efit_events');
+        if (imageUrl) updateData.image = imageUrl;
       } catch (cloudErr) {
         console.warn('Notice: Cloudinary upload warning on update:', cloudErr.message || cloudErr);
       }
@@ -1556,19 +1571,8 @@ app.post('/api/team', verifyAdmin, upload.single('image'), async (req, res) => {
     let imageUrl = req.body.image || '';
     if (req.file) {
       try {
-        imageUrl = await new Promise((resolve, reject) => {
-          cloudinary.uploader
-            .upload_stream(
-              {
-                folder: 'efit_team',
-                transformation: [{ width: 800, height: 1000, crop: 'limit' }],
-              },
-              (error, result) => {
-                if (error) reject(error);
-                else resolve(result?.secure_url || '');
-              }
-            )
-            .end(req.file.buffer);
+        imageUrl = await uploadBufferToCloudinary(req.file.buffer, 'efit_team', {
+          transformation: [{ width: 800, height: 1000, crop: 'limit' }],
         });
       } catch (cloudErr) {
         console.error('Cloudinary team member photo upload error:', cloudErr);
@@ -1596,19 +1600,8 @@ app.put('/api/team/:id', verifyAdmin, upload.single('image'), async (req, res) =
     let updateData = { ...req.body };
     if (req.file) {
       try {
-        const uploadResult = await new Promise((resolve, reject) => {
-          cloudinary.uploader
-            .upload_stream(
-              {
-                folder: 'efit_team',
-                transformation: [{ width: 800, height: 1000, crop: 'limit' }],
-              },
-              (error, result) => {
-                if (error) reject(error);
-                else resolve(result?.secure_url || '');
-              }
-            )
-            .end(req.file.buffer);
+        const uploadResult = await uploadBufferToCloudinary(req.file.buffer, 'efit_team', {
+          transformation: [{ width: 800, height: 1000, crop: 'limit' }],
         });
         if (uploadResult) {
           updateData.image = uploadResult;
@@ -1660,19 +1653,8 @@ app.post('/api/team/:id/photo', verifyAdmin, upload.single('image'), async (req,
       return res.status(400).json({ error: 'No image file uploaded' });
     }
 
-    const uploadResult = await new Promise((resolve, reject) => {
-      cloudinary.uploader
-        .upload_stream(
-          {
-            folder: 'efit_team',
-            transformation: [{ width: 800, height: 1000, crop: 'limit' }],
-          },
-          (error, result) => {
-            if (error) reject(error);
-            else resolve(result?.secure_url || '');
-          }
-        )
-        .end(req.file.buffer);
+    const uploadResult = await uploadBufferToCloudinary(req.file.buffer, 'efit_team', {
+      transformation: [{ width: 800, height: 1000, crop: 'limit' }],
     });
 
     if (!uploadResult) {
@@ -1944,14 +1926,7 @@ app.post(['/api/media', '/api/admin/media'], verifyAdmin, upload.single('file'),
 
     if (req.file) {
       try {
-        imageUrl = await new Promise((resolve, reject) => {
-          cloudinary.uploader
-            .upload_stream({ folder: 'efit_media_gallery' }, (error, result) => {
-              if (error) reject(error);
-              else resolve(result?.secure_url || '');
-            })
-            .end(req.file.buffer);
-        });
+        imageUrl = await uploadBufferToCloudinary(req.file.buffer, 'efit_media_gallery');
       } catch (cloudErr) {
         console.warn('Media upload Cloudinary note:', cloudErr.message || cloudErr);
       }

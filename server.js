@@ -1689,6 +1689,158 @@ app.get('/api/user/profile', verifyToken, async (req, res) => {
   }
 });
 
+// GET /api/portfolio/:identifier - Super Admin/Admin or Member fetches ANY user's or member's portfolio & event contributions
+app.get('/api/portfolio/:identifier', verifyToken, async (req, res) => {
+  try {
+    const identifier = req.params.identifier;
+    let query = {
+      $or: [
+        { universityId: new RegExp(`^${identifier}$`, 'i') },
+        { email: new RegExp(`^${identifier}$`, 'i') },
+      ],
+    };
+    if (mongoose.Types.ObjectId.isValid(identifier)) {
+      query.$or.push({ _id: identifier });
+    }
+
+    const [user, member] = await Promise.all([
+      User.findOne(query).lean(),
+      Member.findOne({
+        $or: [
+          { universityId: new RegExp(`^${identifier}$`, 'i') },
+          { email: new RegExp(`^${identifier}$`, 'i') },
+          { id: identifier },
+          { slug: identifier },
+        ],
+      }).lean(),
+    ]);
+
+    if (!user && !member) {
+      return res.status(404).json({ error: 'Person not found in portal database' });
+    }
+
+    const uniId = user?.universityId || member?.universityId || member?.id || identifier;
+    const email = user?.email || member?.email || '';
+
+    // Fetch this person's event duty contributions
+    const myAssignments = await EventAssignment.find({
+      $or: [
+        { studentId: new RegExp(`^${uniId}$`, 'i') },
+        { studentEmail: new RegExp(`^${email}$`, 'i') },
+      ],
+    })
+      .sort({ assignmentDate: -1 })
+      .lean();
+
+    // For each event they contributed to, find what OTHER team members contributed to that event
+    const eventIds = Array.from(new Set(myAssignments.map((a) => a.eventId?.toString()).filter(Boolean)));
+    const allCoAssignments = eventIds.length > 0
+      ? await EventAssignment.find({ eventId: { $in: eventIds } }).lean()
+      : [];
+
+    const coAssignmentsByEvent = new Map();
+    allCoAssignments.forEach((ca) => {
+      const eid = ca.eventId.toString();
+      if (!coAssignmentsByEvent.has(eid)) coAssignmentsByEvent.set(eid, []);
+      coAssignmentsByEvent.get(eid).push({
+        name: ca.studentName,
+        studentId: ca.studentId,
+        role: ca.assignedRole,
+        attendance: ca.attendance,
+        hours: ca.actualParticipationHours || (ca.isFullDay ? 8 : 4),
+        isCurrentPerson: ca.studentId === uniId,
+      });
+    });
+
+    let totalAssigned = myAssignments.length;
+    let totalAttended = 0;
+    let totalVerifiedHours = 0;
+    let totalMissed = 0;
+
+    const enrichedContributions = myAssignments.map((a) => {
+      const hours = a.actualParticipationHours || (a.isFullDay ? 8 : a.attendance === 'Present' ? 4 : 0);
+      if (a.attendance === 'Present' || a.attendance === 'Partially Present') {
+        totalAttended += 1;
+        totalVerifiedHours += hours;
+      } else if (a.attendance === 'Not Present') {
+        totalMissed += 1;
+      }
+
+      const team = coAssignmentsByEvent.get(a.eventId?.toString()) || [];
+
+      return {
+        _id: a._id,
+        eventId: a.eventId,
+        eventTitle: a.eventTitle,
+        eventSlug: a.eventSlug,
+        club: a.club,
+        assignedRole: a.assignedRole,
+        assignedTaskDetails: a.assignedTaskDetails,
+        assignmentDate: a.assignmentDate,
+        scheduleType: a.scheduleType,
+        startTime: a.startTime,
+        endTime: a.endTime,
+        isFullDay: a.isFullDay,
+        attendance: a.attendance,
+        status: a.status,
+        actualHours: hours,
+        adminRemarks: a.adminRemarks,
+        teamContributors: team,
+      };
+    });
+
+    // Fetch registered events (student participation)
+    const registrations = await Registration.find({
+      $or: [
+        { user: email },
+        { user: uniId },
+        { email: email },
+      ],
+    }).lean();
+
+    const profile = {
+      _id: user?._id || member?._id,
+      name: user?.name || member?.name || 'Member',
+      universityId: uniId,
+      email: email,
+      image: user?.image || user?.avatar || member?.image || '',
+      accountType: user?.accountType || (member ? 'MEMBER' : 'STUDENT'),
+      teamRole: member?.role || user?.roles?.[0] || 'Member',
+      teamCategory: member?.category || 'Core Team',
+      department: user?.department || member?.category || 'Computer Science & Engineering',
+      year: user?.year || 'B.Tech',
+      cgpa: user?.cgpa || '',
+      phone: user?.phone || '',
+      bio: user?.bio || member?.bio || '',
+      skills: user?.skills?.length ? user.skills : (member?.skills || []),
+      interests: user?.interests || [],
+      projects: user?.projects || [],
+      experience: user?.experience || [],
+      socials: { ...(member?.socials || {}), ...(user?.socials || {}) },
+      portfolioStatus: user?.portfolioStatus || 'BASIC',
+      portfolioVisibility: user?.portfolioVisibility || 'PUBLIC',
+      createdAt: user?.createdAt || member?.createdAt,
+    };
+
+    res.json({
+      success: true,
+      profile,
+      contributions: enrichedContributions,
+      registrations,
+      stats: {
+        totalAssigned,
+        totalAttended,
+        totalVerifiedHours,
+        totalMissed,
+        totalRegisteredEvents: registrations.length,
+      },
+    });
+  } catch (err) {
+    console.error('Error fetching unified portfolio:', err);
+    res.status(500).json({ error: 'Failed to fetch portfolio and event contribution dossier' });
+  }
+});
+
 // PUT /api/user/profile - Update authenticated user's own profile
 app.put('/api/user/profile', verifyToken, async (req, res) => {
   try {

@@ -929,27 +929,41 @@ app.put('/api/events/:id', verifyAdmin, upload.single('image'), async (req, res)
       else if (org.includes('rubix')) updateData.club = 'rubix';
     }
 
-    const updated = await Event.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    const param = req.params.id;
+    let updated = null;
+    if (mongoose.Types.ObjectId.isValid(param)) {
+      updated = await Event.findByIdAndUpdate(param, updateData, { new: true });
+    }
+    if (!updated) {
+      updated = await Event.findOneAndUpdate({ slug: param }, updateData, { new: true });
+    }
     if (!updated) return res.status(404).json({ error: 'Event not found' });
 
     await recordAudit('EVENT_MODIFIED', req.user?.email, updated.title, 'SUCCESS');
     res.json({ success: true, event: updated });
   } catch (err) {
     console.error('Error updating event:', err);
-    res.status(500).json({ error: 'Failed to update event' });
+    res.status(500).json({ error: 'Failed to update event: ' + err.message });
   }
 });
 
 app.delete('/api/events/:id', verifyAdmin, async (req, res) => {
   try {
-    const deleted = await Event.findByIdAndDelete(req.params.id);
+    const param = req.params.id;
+    let deleted = null;
+    if (mongoose.Types.ObjectId.isValid(param)) {
+      deleted = await Event.findByIdAndDelete(param);
+    }
+    if (!deleted) {
+      deleted = await Event.findOneAndDelete({ slug: param });
+    }
     if (!deleted) return res.status(404).json({ error: 'Event not found' });
 
     await recordAudit('EVENT_DELETED', req.user?.email, deleted.title, 'SUCCESS');
     res.json({ success: true, message: 'Event deleted' });
   } catch (err) {
     console.error('Error deleting event:', err);
-    res.status(500).json({ error: 'Failed to delete event' });
+    res.status(500).json({ error: 'Failed to delete event: ' + err.message });
   }
 });
 
@@ -2628,7 +2642,14 @@ app.post(['/api/media', '/api/admin/media'], verifyAdmin, upload.single('file'),
 
 app.delete(['/api/media/:id', '/api/admin/media/:id'], verifyAdmin, async (req, res) => {
   try {
-    const deleted = await Media.findByIdAndDelete(req.params.id);
+    const param = req.params.id;
+    let deleted = null;
+    if (mongoose.Types.ObjectId.isValid(param)) {
+      deleted = await Media.findByIdAndDelete(param);
+    }
+    if (!deleted) {
+      deleted = await Media.findOneAndDelete({ $or: [{ id: param }, { publicId: param }] });
+    }
     if (!deleted) {
       return res.status(404).json({ error: 'Media asset not found in database' });
     }
@@ -2636,7 +2657,7 @@ app.delete(['/api/media/:id', '/api/admin/media/:id'], verifyAdmin, async (req, 
     res.json({ success: true, message: 'Media asset permanently deleted', id: req.params.id });
   } catch (err) {
     console.error('Error deleting media:', err);
-    res.status(500).json({ error: 'Failed to delete media asset' });
+    res.status(500).json({ error: 'Failed to delete media asset: ' + err.message });
   }
 });
 

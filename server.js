@@ -851,6 +851,49 @@ app.post('/api/events', verifyAdmin, upload.single('image'), async (req, res) =>
     const newEvent = new Event(eventData);
     await newEvent.save();
 
+    // ── Auto-provision assigned event coordinators if provided ──
+    if (req.body.coordinators) {
+      try {
+        let coords = [];
+        if (typeof req.body.coordinators === 'string') {
+          coords = JSON.parse(req.body.coordinators);
+        } else if (Array.isArray(req.body.coordinators)) {
+          coords = req.body.coordinators;
+        }
+
+        if (Array.isArray(coords) && coords.length > 0) {
+          for (const coord of coords) {
+            if (coord.studentId && coord.name) {
+              await EventAssignment.create({
+                eventId: newEvent._id,
+                club: newEvent.club,
+                studentId: coord.studentId,
+                studentName: coord.name,
+                studentEmail: coord.email || `${coord.studentId}@kluniversity.in`,
+                department: coord.department || 'Computer Science & Engineering',
+                assignmentDate: newEvent.date || new Date().toISOString().split('T')[0],
+                assignedRole: coord.role || 'Lead Event Coordinator',
+                assignedTaskDetails: 'Assigned during event creation',
+                assignedBy: req.user?.email || 'admin',
+                attendance: 'Pending',
+                status: 'Assigned',
+                auditTrail: [
+                  {
+                    action: 'ASSIGNED',
+                    by: req.user?.email || 'admin',
+                    timestamp: new Date(),
+                    details: 'Initial coordinator assignment during event publishing',
+                  },
+                ],
+              });
+            }
+          }
+        }
+      } catch (assignErr) {
+        console.warn('Notice: Non-blocking coordinator auto-assignment warning:', assignErr.message);
+      }
+    }
+
     await recordAudit('EVENT_CREATED', req.user?.email, newEvent.title, 'SUCCESS');
     res.status(201).json({ success: true, event: newEvent });
   } catch (err) {
@@ -2001,7 +2044,15 @@ app.get('/api/students', verifyAdmin, async (req, res) => {
       filter.portfolioStatus = portfolioStatus;
     }
 
-    const students = await User.find(filter).sort({ createdAt: -1 }).lean();
+    const total = await User.countDocuments(filter);
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = req.query.limit ? Math.max(1, parseInt(req.query.limit)) : (req.query.all === 'true' ? 0 : 50);
+
+    let queryBuilder = User.find(filter).sort({ createdAt: -1 });
+    if (limit > 0) {
+      queryBuilder = queryBuilder.skip((page - 1) * limit).limit(limit);
+    }
+    const students = await queryBuilder.lean();
 
     const enriched = students.map((s) => {
       let score = 0;
@@ -2039,6 +2090,9 @@ app.get('/api/students', verifyAdmin, async (req, res) => {
     res.json({
       success: true,
       count: enriched.length,
+      total,
+      page,
+      totalPages: limit > 0 ? Math.ceil(total / limit) : 1,
       students: enriched,
     });
   } catch (err) {

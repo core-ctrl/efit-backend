@@ -17,31 +17,17 @@ async function seed() {
   // 2. Notices
   const noticeCount = await Notice.countDocuments();
   if (noticeCount === 0) {
-    console.log('Seeding initial notices...');
+    console.log('Seeding initial notice...');
     await Notice.insertMany([
       {
-        title: 'EFIT Recruitment 2026-27 Applications Open',
-        content: 'Applications are now open for core coordinator roles across Technical, Design, Logistics, and Social Media wings.',
+        title: 'Student Portal Access: Microsoft SSO & Direct Password Login Guide',
+        content: 'Attention KL University Students: For your first visit to the EFIT Student Portal, please authenticate using your official college Microsoft account (@kluniversity.in) by clicking Continue with Microsoft. Once authenticated, open your Portal Profile and configure a personal password. You can then sign in directly on any device using your Student ID / Email and password without needing Microsoft SSO verification every time.',
         category: 'IMPORTANT',
         priority: 'High',
-        author: 'President Office',
-      },
-      {
-        title: 'CodeSprint 2026 Problem Statements Released',
-        content: 'Check the portal for preliminary round guidelines and contest environment rules for CodeSprint 2026.',
-        category: 'EVENT',
-        priority: 'Normal',
-        author: 'Technical Wing',
-      },
-      {
-        title: 'Weekly Community Meetup & Tech Showcase',
-        content: 'Join us this Friday at 4:30 PM for lightning talks and project demos by junior and senior members.',
-        category: 'GENERAL',
-        priority: 'Normal',
-        author: 'Community Lead',
+        author: 'Lead Developer & Admin',
       }
     ]);
-    console.log('Notices seeded.');
+    console.log('Initial notice seeded.');
   } else {
     console.log(`Notices already exist (${noticeCount} records). Skipping.`);
   }
@@ -87,38 +73,8 @@ async function seed() {
     console.log(`Projects already exist (${projectCount} records). Skipping.`);
   }
 
-  // 4. Contests
-  const contestCount = await Contest.countDocuments();
-  if (contestCount === 0) {
-    console.log('Seeding initial contests...');
-    await Contest.insertMany([
-      {
-        title: 'EFIT CodeSprint 2026',
-        description: 'Competitive programming contest featuring dynamic programming, graph algorithms, and data structures challenges.',
-        status: 'Upcoming',
-        deadline: '2026-11-14T23:59:59.000Z',
-        prizePool: '₹25,000 + Certificates',
-        teamSize: 'Individual / 2 Members',
-        rules: ['Original solutions only', 'No external LLM assistance during live rounds', 'Time and memory limits enforced'],
-        prizes: ['1st: ₹15,000 + Trophy', '2nd: ₹7,000', '3rd: ₹3,000'],
-        registrationOpen: true,
-      },
-      {
-        title: 'HackMatrix 4.0 Hackathon',
-        description: '36-hour hackathon to build solutions addressing Education, Cybersecurity, and AI for Social Good.',
-        status: 'Upcoming',
-        deadline: '2026-12-10T18:00:00.000Z',
-        prizePool: '₹50,000',
-        teamSize: '2 to 4 Members',
-        rules: ['All code must be written during the hackathon', 'Open source libraries allowed', 'Demo required for jury evaluation'],
-        prizes: ['Winner: ₹30,000', 'Runner-up: ₹15,000', 'Best Freshers Team: ₹5,000'],
-        registrationOpen: true,
-      }
-    ]);
-    console.log('Contests seeded.');
-  } else {
-    console.log(`Contests already exist (${contestCount} records). Skipping.`);
-  }
+  // 4. Contests: Contests are managed dynamically via Admin Portal. No mock contests seeded.
+  console.log('Contests configured for dynamic admin management.');
 
   console.log('Seeding complete!');
   process.exit(0);

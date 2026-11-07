@@ -270,6 +270,7 @@ function verifyAdmin(req, res, next) {
 const ALL_MODULES = [
   'DASHBOARD',
   'MEMBERS',
+  'STUDENTS',
   'ROLES',
   'PERMISSIONS',
   'EVENTS',
@@ -282,7 +283,8 @@ const ALL_MODULES = [
   'SETTINGS',
 ];
 
-const DEFAULT_MEMBER_MODULES = ['DASHBOARD', 'EVENTS', 'CONTESTS', 'PROJECTS', 'NOTICES', 'MEDIA'];
+const DEFAULT_MEMBER_MODULES = ['DASHBOARD', 'MEMBERS', 'STUDENTS', 'EVENTS', 'CONTESTS', 'PROJECTS', 'NOTICES', 'MEDIA'];
+const DEFAULT_STUDENT_MODULES = ['DASHBOARD', 'EVENTS', 'CONTESTS', 'NOTICES'];
 
 function verifySuperAdmin(req, res, next) {
   verifyToken(req, res, () => {
@@ -387,9 +389,16 @@ app.post('/api/auth/login', async (req, res) => {
         ? ALL_MODULES
         : dbUser?.allowedModules?.length
         ? dbUser.allowedModules
+        : computedType === 'STUDENT'
+        ? DEFAULT_STUDENT_MODULES
         : DEFAULT_MEMBER_MODULES;
 
     const customPermissions = dbUser?.customPermissions || {};
+
+    if (dbUser) {
+      dbUser.lastLogin = new Date();
+      await dbUser.save();
+    }
 
     const userPayload = {
       id: studentId,
@@ -402,6 +411,7 @@ app.post('/api/auth/login', async (req, res) => {
       allowedModules,
       customPermissions,
       status: 'ACTIVE',
+      image: dbUser?.image || memberRecord?.image || '',
     };
 
     const token = jwt.sign(userPayload, JWT_SECRET, { expiresIn: '7d' });
@@ -590,6 +600,8 @@ app.post('/api/auth/microsoft', async (req, res) => {
         ? ALL_MODULES
         : user?.allowedModules?.length
         ? user.allowedModules
+        : computedType === 'STUDENT'
+        ? DEFAULT_STUDENT_MODULES
         : DEFAULT_MEMBER_MODULES;
 
     const customPermissions = user?.customPermissions || {};
@@ -607,6 +619,8 @@ app.post('/api/auth/microsoft', async (req, res) => {
         authProvider: 'MICROSOFT',
         status: 'Active',
         hasPasswordSet: false,
+        image: memberRecord?.image || '',
+        lastLogin: new Date(),
       });
       await user.save();
     } else {
@@ -615,6 +629,8 @@ app.post('/api/auth/microsoft', async (req, res) => {
       user.accountType = computedType;
       user.roles = computedRoles;
       user.status = 'Active';
+      user.lastLogin = new Date();
+      if (memberRecord?.image && !user.image) user.image = memberRecord.image;
       if (!user.allowedModules?.length) user.allowedModules = allowedModules;
       await user.save();
     }
@@ -630,6 +646,7 @@ app.post('/api/auth/microsoft', async (req, res) => {
       allowedModules: user.allowedModules || allowedModules,
       customPermissions: user.customPermissions || customPermissions,
       status: user.status,
+      image: user.image || memberRecord?.image || '',
     };
 
     const token = jwt.sign(userPayload, JWT_SECRET, { expiresIn: '7d' });
@@ -1402,57 +1419,61 @@ app.post('/api/assignments/:id/notify', verifyAdmin, async (req, res) => {
   }
 });
 
-// 5. Search Students from Database (Admin only)
-app.get('/api/students/search', verifyAdmin, async (req, res) => {
+// 5. Search EFIT Members for Event Duty Assignment (Admin only)
+// Note: ONLY official EFIT members are contributors/coordinators. Ordinary students attend events only.
+app.get(['/api/students/search', '/api/members/contributors/search'], verifyAdmin, async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
     const regex = new RegExp(q, 'i');
 
-    const [members, users] = await Promise.all([
+    const [members, memberUsers] = await Promise.all([
       Member.find({
         $or: [{ name: regex }, { universityId: regex }, { email: regex }, { id: regex }],
       })
-        .limit(25)
+        .limit(30)
         .lean(),
       User.find({
+        accountType: { $in: ['MEMBER', 'SUPER_ADMIN', 'ADMIN'] },
         $or: [{ name: regex }, { universityId: regex }, { email: regex }],
       })
-        .limit(25)
+        .limit(30)
         .lean(),
     ]);
 
-    const studentMap = new Map();
+    const memberMap = new Map();
 
     for (const m of members) {
       const id = m.universityId || m.id;
-      if (id && !studentMap.has(id)) {
-        studentMap.set(id, {
+      if (id && !memberMap.has(id)) {
+        memberMap.set(id, {
           studentId: id,
           name: m.name,
           email: m.email || `${id}@kluniversity.in`,
-          department: m.category || 'Engineering',
+          department: m.category || 'EFIT Member',
           role: m.role || 'Member',
+          isMember: true,
         });
       }
     }
 
-    for (const u of users) {
+    for (const u of memberUsers) {
       const id = u.universityId;
-      if (id && !studentMap.has(id)) {
-        studentMap.set(id, {
+      if (id && !memberMap.has(id)) {
+        memberMap.set(id, {
           studentId: id,
           name: u.name,
           email: u.email,
-          department: u.department || 'Student',
-          role: u.accountType || 'Student',
+          department: u.department || 'EFIT Core',
+          role: u.roles?.[0] || u.accountType || 'Member',
+          isMember: true,
         });
       }
     }
 
-    res.json(Array.from(studentMap.values()));
+    res.json(Array.from(memberMap.values()));
   } catch (err) {
-    console.error('Error searching students:', err);
-    res.status(500).json({ error: 'Failed to search students' });
+    console.error('Error searching members for assignments:', err);
+    res.status(500).json({ error: 'Failed to search members' });
   }
 });
 
@@ -1600,6 +1621,372 @@ app.get('/api/admin/contributions', verifyAdmin, async (req, res) => {
   } catch (err) {
     console.error('Error fetching student contributions:', err);
     res.status(500).json({ error: 'Failed to fetch student contributions' });
+  }
+});
+
+// ─── USER PROFILE & PORTFOLIO MANAGEMENT ───
+
+// GET /api/user/profile - Get current authenticated user's complete profile
+app.get('/api/user/profile', verifyToken, async (req, res) => {
+  try {
+    const userEmail = (req.user.email || '').toLowerCase().trim();
+    const uniId = req.user.universityId || req.user.studentId || req.user.id;
+
+    let user = await User.findOne({
+      $or: [
+        { email: new RegExp(`^${userEmail}$`, 'i') },
+        { universityId: new RegExp(`^${uniId}$`, 'i') },
+      ],
+    }).lean();
+
+    const member = await Member.findOne({
+      $or: [
+        { universityId: new RegExp(`^${uniId}$`, 'i') },
+        { email: new RegExp(`^${userEmail}$`, 'i') },
+      ],
+    }).lean();
+
+    if (!user && !member) {
+      return res.status(404).json({ error: 'User profile not found.' });
+    }
+
+    if (!user) {
+      user = {
+        name: member.name,
+        email: userEmail,
+        universityId: uniId,
+        accountType: 'MEMBER',
+        roles: [member.role || 'Member'],
+        image: member.image || '',
+        avatar: member.image || '',
+        bio: member.bio || '',
+        department: member.category || 'Computer Science & Engineering',
+        year: 'B.Tech',
+        skills: member.skills || [],
+        interests: [],
+        projects: [],
+        experience: [],
+        socials: member.socials || {},
+        portfolioStatus: 'BASIC',
+        portfolioVisibility: 'PUBLIC',
+      };
+    } else {
+      // Merge member photo if user photo is empty
+      if (!user.image && member?.image) {
+        user.image = member.image;
+        user.avatar = member.image;
+      }
+      if (member) {
+        user.teamRole = member.role;
+        user.teamCategory = member.category;
+      }
+    }
+
+    res.json({ success: true, profile: user });
+  } catch (err) {
+    console.error('Error fetching user profile:', err);
+    res.status(500).json({ error: 'Failed to fetch user profile' });
+  }
+});
+
+// PUT /api/user/profile - Update authenticated user's own profile
+app.put('/api/user/profile', verifyToken, async (req, res) => {
+  try {
+    const userEmail = (req.user.email || '').toLowerCase().trim();
+    const uniId = req.user.universityId || req.user.studentId || req.user.id;
+    const {
+      name,
+      bio,
+      department,
+      year,
+      cgpa,
+      phone,
+      skills,
+      interests,
+      projects,
+      experience,
+      socials,
+      portfolioVisibility,
+    } = req.body;
+
+    let user = await User.findOne({
+      $or: [
+        { email: new RegExp(`^${userEmail}$`, 'i') },
+        { universityId: new RegExp(`^${uniId}$`, 'i') },
+      ],
+    });
+
+    if (!user) {
+      user = new User({
+        email: userEmail,
+        universityId: uniId,
+        name: name || req.user.name || 'User',
+        accountType: req.user.accountType || 'STUDENT',
+      });
+    }
+
+    if (name) user.name = name.trim();
+    if (bio !== undefined) user.bio = bio;
+    if (department !== undefined) user.department = department;
+    if (year !== undefined) user.year = year;
+    if (cgpa !== undefined) user.cgpa = cgpa;
+    if (phone !== undefined) user.phone = phone;
+    if (Array.isArray(skills)) user.skills = skills;
+    if (Array.isArray(interests)) user.interests = interests;
+    if (Array.isArray(projects)) user.projects = projects;
+    if (Array.isArray(experience)) user.experience = experience;
+    if (socials && typeof socials === 'object') {
+      user.socials = { ...(user.socials || {}), ...socials };
+    }
+    if (portfolioVisibility) user.portfolioVisibility = portfolioVisibility;
+
+    // Recalculate portfolio completion score
+    let score = 0;
+    if (user.bio && user.bio.trim().length > 10) score += 25;
+    if (user.skills && user.skills.length >= 2) score += 25;
+    if (user.projects && user.projects.length >= 1) score += 25;
+    if (user.socials?.github || user.socials?.linkedin || user.socials?.portfolio) score += 25;
+
+    user.portfolioStatus = score >= 75 ? 'COMPLETE' : score >= 25 ? 'BASIC' : 'INCOMPLETE';
+
+    await user.save();
+
+    // Sync changes to Member record if user is an EFIT member
+    await Member.findOneAndUpdate(
+      {
+        $or: [
+          { universityId: new RegExp(`^${uniId}$`, 'i') },
+          { email: new RegExp(`^${userEmail}$`, 'i') },
+        ],
+      },
+      {
+        $set: {
+          name: user.name,
+          ...(user.skills?.length ? { skills: user.skills } : {}),
+        },
+      }
+    );
+
+    await recordAudit('PROFILE_UPDATED', userEmail, 'Self Profile', 'SUCCESS');
+    res.json({ success: true, profile: user });
+  } catch (err) {
+    console.error('Error updating profile:', err);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// POST /api/user/avatar - Upload profile picture to Cloudinary
+app.post('/api/user/avatar', verifyToken, upload.single('image'), async (req, res) => {
+  try {
+    const userEmail = (req.user.email || '').toLowerCase().trim();
+    const uniId = req.user.universityId || req.user.studentId || req.user.id;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No image file uploaded' });
+    }
+
+    const imageUrl = await uploadBufferToCloudinary(req.file.buffer, 'efit_profiles', {
+      transformation: [{ width: 600, height: 600, crop: 'limit', quality: 'auto:good' }],
+    });
+
+    const user = await User.findOneAndUpdate(
+      {
+        $or: [
+          { email: new RegExp(`^${userEmail}$`, 'i') },
+          { universityId: new RegExp(`^${uniId}$`, 'i') },
+        ],
+      },
+      { $set: { image: imageUrl, avatar: imageUrl } },
+      { new: true, upsert: true }
+    );
+
+    // Keep Member photo in sync
+    await Member.findOneAndUpdate(
+      {
+        $or: [
+          { universityId: new RegExp(`^${uniId}$`, 'i') },
+          { email: new RegExp(`^${userEmail}$`, 'i') },
+        ],
+      },
+      { $set: { image: imageUrl } }
+    );
+
+    await recordAudit('AVATAR_UPLOADED', userEmail, 'Profile Photo', 'SUCCESS');
+    res.json({ success: true, imageUrl, user });
+  } catch (err) {
+    console.error('Error uploading avatar:', err);
+    res.status(500).json({ error: 'Failed to upload profile photo' });
+  }
+});
+
+// ─── REGISTERED STUDENTS MANAGEMENT (ADMIN & EFIT MEMBERS ONLY) ───
+
+// GET /api/students - List all registered students
+app.get('/api/students', verifyAdmin, async (req, res) => {
+  try {
+    const { q, department, status, portfolioStatus } = req.query;
+    const filter = { accountType: 'STUDENT' };
+
+    if (q) {
+      const regex = new RegExp(q.trim(), 'i');
+      filter.$or = [
+        { name: regex },
+        { universityId: regex },
+        { email: regex },
+        { department: regex },
+      ];
+    }
+
+    if (department && department !== 'ALL') {
+      filter.department = new RegExp(department, 'i');
+    }
+
+    if (status && status !== 'ALL') {
+      filter.status = status;
+    }
+
+    if (portfolioStatus && portfolioStatus !== 'ALL') {
+      filter.portfolioStatus = portfolioStatus;
+    }
+
+    const students = await User.find(filter).sort({ createdAt: -1 }).lean();
+
+    const enriched = students.map((s) => {
+      let score = 0;
+      if (s.bio && s.bio.trim().length > 10) score += 25;
+      if (s.skills && s.skills.length >= 2) score += 25;
+      if (s.projects && s.projects.length >= 1) score += 25;
+      if (s.socials?.github || s.socials?.linkedin || s.socials?.portfolio) score += 25;
+
+      const computedStatus = s.portfolioStatus || (score >= 75 ? 'COMPLETE' : score >= 25 ? 'BASIC' : 'INCOMPLETE');
+
+      return {
+        _id: s._id,
+        id: s.universityId,
+        universityId: s.universityId,
+        name: s.name,
+        email: s.email,
+        image: s.image || s.avatar || '',
+        department: s.department || 'Computer Science & Engineering',
+        year: s.year || 'B.Tech',
+        status: s.status || 'Active',
+        portfolioStatus: computedStatus,
+        portfolioScore: score,
+        portfolioVisibility: s.portfolioVisibility || 'PUBLIC',
+        bio: s.bio || '',
+        skills: s.skills || [],
+        interests: s.interests || [],
+        projects: s.projects || [],
+        experience: s.experience || [],
+        socials: s.socials || {},
+        createdAt: s.createdAt,
+        lastLogin: s.lastLogin || s.updatedAt || s.createdAt,
+      };
+    });
+
+    res.json({
+      success: true,
+      count: enriched.length,
+      students: enriched,
+    });
+  } catch (err) {
+    console.error('Error fetching students list:', err);
+    res.status(500).json({ error: 'Failed to fetch registered students' });
+  }
+});
+
+// GET /api/students/:id - Get student profile and registrations
+app.get('/api/students/:id', verifyAdmin, async (req, res) => {
+  try {
+    const param = req.params.id;
+    let query = {};
+    if (mongoose.Types.ObjectId.isValid(param)) {
+      query = { $or: [{ _id: param }, { universityId: param }] };
+    } else {
+      query = { universityId: param };
+    }
+
+    const student = await User.findOne(query).lean();
+    if (!student) {
+      return res.status(404).json({ error: 'Student account not found' });
+    }
+
+    const registrations = await Registration.find({
+      $or: [
+        { user: student.email },
+        { user: student.universityId },
+        { email: student.email },
+      ],
+    }).lean();
+
+    res.json({
+      success: true,
+      student,
+      registrations,
+    });
+  } catch (err) {
+    console.error('Error loading student detail:', err);
+    res.status(500).json({ error: 'Failed to load student details' });
+  }
+});
+
+// PUT /api/students/:id - Update student portfolio / profile by authorized admin
+app.put('/api/students/:id', verifyAdmin, async (req, res) => {
+  try {
+    const param = req.params.id;
+    let query = {};
+    if (mongoose.Types.ObjectId.isValid(param)) {
+      query = { $or: [{ _id: param }, { universityId: param }] };
+    } else {
+      query = { universityId: param };
+    }
+
+    const student = await User.findOne(query);
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    const {
+      name,
+      bio,
+      department,
+      year,
+      cgpa,
+      phone,
+      skills,
+      interests,
+      projects,
+      experience,
+      socials,
+      status,
+      portfolioStatus,
+      portfolioVisibility,
+    } = req.body;
+
+    if (name) student.name = name.trim();
+    if (bio !== undefined) student.bio = bio;
+    if (department !== undefined) student.department = department;
+    if (year !== undefined) student.year = year;
+    if (cgpa !== undefined) student.cgpa = cgpa;
+    if (phone !== undefined) student.phone = phone;
+    if (Array.isArray(skills)) student.skills = skills;
+    if (Array.isArray(interests)) student.interests = interests;
+    if (Array.isArray(projects)) student.projects = projects;
+    if (Array.isArray(experience)) student.experience = experience;
+    if (socials && typeof socials === 'object') {
+      student.socials = { ...(student.socials || {}), ...socials };
+    }
+    if (status) student.status = status;
+    if (portfolioStatus) student.portfolioStatus = portfolioStatus;
+    if (portfolioVisibility) student.portfolioVisibility = portfolioVisibility;
+
+    await student.save();
+
+    await recordAudit('STUDENT_PORTFOLIO_EDITED', req.user.email, student.universityId, 'SUCCESS');
+    res.json({ success: true, student });
+  } catch (err) {
+    console.error('Error updating student portfolio:', err);
+    res.status(500).json({ error: 'Failed to update student portfolio' });
   }
 });
 
@@ -2247,7 +2634,13 @@ app.get('/api/admin/users', verifyAdmin, async (req, res) => {
         email: u.email,
         accountType: u.accountType,
         roles: u.roles || ['STUDENT'],
-        allowedModules: u.allowedModules?.length ? u.allowedModules : (u.accountType === 'SUPER_ADMIN' ? ALL_MODULES : DEFAULT_MEMBER_MODULES),
+        allowedModules: u.allowedModules?.length
+          ? u.allowedModules
+          : u.accountType === 'SUPER_ADMIN'
+          ? ALL_MODULES
+          : u.accountType === 'STUDENT'
+          ? DEFAULT_STUDENT_MODULES
+          : DEFAULT_MEMBER_MODULES,
         customPermissions: u.customPermissions || {},
         status: u.status || 'Active',
       });

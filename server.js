@@ -2005,7 +2005,7 @@ app.put('/api/user/profile', verifyToken, async (req, res) => {
     if (user.bio && user.bio.trim().length > 10) score += 25;
     if (user.skills && user.skills.length >= 2) score += 25;
     if (user.projects && user.projects.length >= 1) score += 25;
-    if (user.socials?.github || user.socials?.linkedin || user.socials?.portfolio) score += 25;
+    if (user.socials?.github || user.socials?.linkedin || user.socials?.portfolio || user.socials?.other || user.socials?.leetcode) score += 25;
 
     user.portfolioStatus = score >= 75 ? 'COMPLETE' : score >= 25 ? 'BASIC' : 'INCOMPLETE';
 
@@ -2124,7 +2124,7 @@ app.get('/api/students', verifyAdmin, async (req, res) => {
       if (s.bio && s.bio.trim().length > 10) score += 25;
       if (s.skills && s.skills.length >= 2) score += 25;
       if (s.projects && s.projects.length >= 1) score += 25;
-      if (s.socials?.github || s.socials?.linkedin || s.socials?.portfolio) score += 25;
+      if (s.socials?.github || s.socials?.linkedin || s.socials?.portfolio || s.socials?.other || s.socials?.leetcode) score += 25;
 
       const computedStatus = s.portfolioStatus || (score >= 75 ? 'COMPLETE' : score >= 25 ? 'BASIC' : 'INCOMPLETE');
 

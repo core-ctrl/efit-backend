@@ -42,6 +42,9 @@ const UserSchema = new mongoose.Schema({
     portfolio: { type: String, default: '' },
     twitter: { type: String, default: '' },
     instagram: { type: String, default: '' },
+    leetcode: { type: String, default: '' },
+    other: { type: String, default: '' },
+    otherLabel: { type: String, default: '' },
   },
   portfolioStatus: {
     type: String,

@@ -32,46 +32,8 @@ async function seed() {
     console.log(`Notices already exist (${noticeCount} records). Skipping.`);
   }
 
-  // 3. Projects
-  const projectCount = await Project.countDocuments();
-  if (projectCount === 0) {
-    console.log('Seeding initial projects...');
-    await Project.insertMany([
-      {
-        title: 'Rubix Core API Gateway',
-        description: 'Centralized backend microservices architecture and auth gateway for EFIT digital operations.',
-        category: 'rubix',
-        technologies: ['Node.js', 'Express', 'MongoDB', 'Docker', 'Kubernetes'],
-        githubUrl: 'https://github.com/core-ctrl/KLEFIT',
-        status: 'Active',
-      },
-      {
-        title: 'Event Pulse Real-Time Checkin',
-        description: 'Fast QR-code attendee verification and real-time synchronization dashboard for event coordinators.',
-        category: 'rubix',
-        technologies: ['React', 'Next.js', 'WebSocket', 'Tailwind CSS'],
-        githubUrl: 'https://github.com/core-ctrl/KLEFIT',
-        status: 'Active',
-      },
-      {
-        title: 'Cyber Sentinel Scanner',
-        description: 'Automated vulnerability scanning and security audit tool for campus student applications.',
-        category: 'forensic',
-        technologies: ['Python', 'Docker', 'Nmap', 'Bash'],
-        status: 'Active',
-      },
-      {
-        title: 'Forensic Log Analysis Engine',
-        description: 'Deep-dive analytical engine for audit trails and intrusion detection in institutional networks.',
-        category: 'forensic',
-        technologies: ['Rust', 'ELK Stack', 'TypeScript'],
-        status: 'Active',
-      }
-    ]);
-    console.log('Projects seeded.');
-  } else {
-    console.log(`Projects already exist (${projectCount} records). Skipping.`);
-  }
+  // 3. Projects: Projects are managed dynamically via Admin Portal. No mock projects seeded.
+  console.log('Projects configured for dynamic admin management.');
 
   // 4. Contests: Contests are managed dynamically via Admin Portal. No mock contests seeded.
   console.log('Contests configured for dynamic admin management.');

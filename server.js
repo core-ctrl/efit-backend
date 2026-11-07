@@ -1779,19 +1779,31 @@ app.get('/api/portfolio/:identifier', verifyToken, async (req, res) => {
     const uniId = user?.universityId || member?.universityId || member?.id || identifier;
     const email = user?.email || member?.email || '';
 
-    // Fetch this person's event duty contributions
-    const myAssignments = await EventAssignment.find({
-      $or: [
-        { studentId: new RegExp(`^${uniId}$`, 'i') },
-        { studentEmail: new RegExp(`^${email}$`, 'i') },
-      ],
-    })
-      .sort({ assignmentDate: -1 })
-      .lean();
+    // Determine whether this person is an official EFIT Member vs Ordinary Student
+    const isEfitMember = Boolean(
+      member || 
+      user?.accountType === 'MEMBER' || 
+      user?.accountType === 'ADMIN' || 
+      user?.accountType === 'SUPER_ADMIN' ||
+      (user?.roles && user.roles.some((r) => ['admin', 'super_admin', 'member', 'director', 'coordinator', 'coremember'].includes(r.toLowerCase())))
+    );
+    const isStudent = !isEfitMember;
 
-    // For each event they contributed to, find what OTHER team members contributed to that event
+    // Fetch this person's event duty contributions (ONLY FOR EFIT MEMBERS)
+    const myAssignments = isEfitMember
+      ? await EventAssignment.find({
+          $or: [
+            { studentId: new RegExp(`^${uniId}$`, 'i') },
+            { studentEmail: new RegExp(`^${email}$`, 'i') },
+          ],
+        })
+          .sort({ assignmentDate: -1 })
+          .lean()
+      : [];
+
+    // For each event members contributed to, find what OTHER team members contributed
     const eventIds = Array.from(new Set(myAssignments.map((a) => a.eventId?.toString()).filter(Boolean)));
-    const allCoAssignments = eventIds.length > 0
+    const allCoAssignments = isEfitMember && eventIds.length > 0
       ? await EventAssignment.find({ eventId: { $in: eventIds } }).lean()
       : [];
 
@@ -1846,24 +1858,61 @@ app.get('/api/portfolio/:identifier', verifyToken, async (req, res) => {
       };
     });
 
-    // Fetch registered events (student participation)
-    const registrations = await Registration.find({
+    // Fetch registered events (student event participation records)
+    let registrations = await Registration.find({
       $or: [
+        { userId: uniId },
+        { userId: email },
+        { userId: user?._id?.toString() },
         { user: email },
         { user: uniId },
         { email: email },
       ],
-    }).lean();
+    }).sort({ createdAt: -1 }).lean();
+
+    // If an ordinary student previously had event records in assignments, convert them to participated events
+    if (isStudent) {
+      const pastStudentEvents = await EventAssignment.find({
+        $or: [
+          { studentId: new RegExp(`^${uniId}$`, 'i') },
+          { studentEmail: new RegExp(`^${email}$`, 'i') },
+        ],
+      }).sort({ assignmentDate: -1 }).lean();
+
+      if (pastStudentEvents.length > 0) {
+        const existingTitles = new Set(registrations.map((r) => r.eventTitle?.toLowerCase()));
+        pastStudentEvents.forEach((ev, idx) => {
+          if (!existingTitles.has((ev.eventTitle || '').toLowerCase())) {
+            registrations.push({
+              _id: ev._id,
+              userId: uniId,
+              eventTitle: ev.eventTitle || 'EFIT Event',
+              eventDate: ev.assignmentDate || '2026-11-25',
+              venue: 'KL University SAC / Campus',
+              club: ev.club || 'rubix',
+              passId: 'KL-EFIT-' + (uniId ? String(uniId).slice(-4) : '2026') + '-' + (idx + 1),
+              status: ev.attendance === 'Present' || ev.attendance === 'Partially Present' ? 'ATTENDED' : 'CONFIRMED',
+              createdAt: ev.createdAt || new Date(),
+              participationType: 'Event Attendee / Participant',
+            });
+            existingTitles.add((ev.eventTitle || '').toLowerCase());
+          }
+        });
+      }
+    }
+
+    const totalStudentAttended = registrations.filter((r) => r.status === 'ATTENDED' || r.status === 'PRESENT' || r.attended).length;
+    const totalStudentUpcoming = registrations.filter((r) => r.status === 'CONFIRMED' || r.status === 'REGISTERED').length;
 
     const profile = {
       _id: user?._id || member?._id,
-      name: user?.name || member?.name || 'Member',
+      name: user?.name || member?.name || 'Student',
       universityId: uniId,
       email: email,
       image: user?.image || user?.avatar || member?.image || '',
-      accountType: user?.accountType || (member ? 'MEMBER' : 'STUDENT'),
-      teamRole: member?.role || user?.roles?.[0] || 'Member',
-      teamCategory: member?.category || 'Core Team',
+      accountType: isStudent ? 'STUDENT' : (user?.accountType || 'MEMBER'),
+      teamRole: isStudent ? 'Student' : (member?.role || user?.roles?.[0] || 'Core Member'),
+      teamCategory: isStudent ? '' : (member?.category || 'EFIT Member'),
       department: user?.department || member?.category || 'Computer Science & Engineering',
       year: user?.year || 'B.Tech',
       cgpa: user?.cgpa || '',
@@ -1885,11 +1934,13 @@ app.get('/api/portfolio/:identifier', verifyToken, async (req, res) => {
       contributions: enrichedContributions,
       registrations,
       stats: {
-        totalAssigned,
-        totalAttended,
-        totalVerifiedHours,
-        totalMissed,
+        isStudent,
+        totalAssigned: isStudent ? 0 : totalAssigned,
+        totalAttended: isStudent ? totalStudentAttended : totalAttended,
+        totalVerifiedHours: isStudent ? 0 : totalVerifiedHours,
+        totalMissed: isStudent ? 0 : totalMissed,
         totalRegisteredEvents: registrations.length,
+        upcomingEvents: totalStudentUpcoming,
       },
     });
   } catch (err) {

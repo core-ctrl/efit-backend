@@ -134,11 +134,14 @@ const INITIAL_DEFAULT_ROLES = [
 
 async function seedDefaultRoles() {
   try {
-    const count = await Role.countDocuments();
-    if (count === 0) {
-      await Role.insertMany(INITIAL_DEFAULT_ROLES);
-      console.log('Seeded initial default club roles.');
+    for (const roleData of INITIAL_DEFAULT_ROLES) {
+      await Role.findOneAndUpdate(
+        { name: roleData.name },
+        { $setOnInsert: roleData },
+        { upsert: true, returnDocument: 'after' }
+      );
     }
+    console.log('Synchronized default club roles.');
   } catch (err) {
     console.warn('Role seed note:', err.message);
   }

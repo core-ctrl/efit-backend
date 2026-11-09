@@ -12,6 +12,8 @@ const memberSchema = new mongoose.Schema({
   image: String,
   universityId: { type: String, index: true },
   email: String,
+  phone: String,
+  socials: { type: Object, default: {} },
 }, { timestamps: true });
 
 memberSchema.index({ universityId: 1, id: 1 });

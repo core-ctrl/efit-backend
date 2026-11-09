@@ -2295,8 +2295,19 @@ app.get('/api/team/:id', async (req, res) => {
         { _id: mongoose.Types.ObjectId.isValid(req.params.id) ? req.params.id : null },
         { universityId: req.params.id },
       ],
-    });
+    }).lean();
     if (!member) return res.status(404).json({ error: 'Member not found' });
+
+    // Attach real user socials if the member registered or updated profile
+    if (member.universityId) {
+      const user = await User.findOne({ universityId: member.universityId }).select('socials phone bio').lean();
+      if (user) {
+        member.socials = user.socials || member.socials || {};
+        if (user.phone && !member.phone) member.phone = user.phone;
+        if (user.bio && !member.bio) member.bio = user.bio;
+      }
+    }
+
     res.json(member);
   } catch (err) {
     console.error('Error fetching member:', err);

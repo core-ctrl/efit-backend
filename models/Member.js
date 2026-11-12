@@ -7,6 +7,8 @@ const memberSchema = new mongoose.Schema({
   category: { type: String, index: true },
   designation: String,
   employeeId: { type: String, index: true },
+  location: String,
+  responsibilities: [String],
   x: String,
   y: String,
   image: String,

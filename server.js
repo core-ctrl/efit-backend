@@ -2266,9 +2266,24 @@ app.get('/api/team', async (req, res) => {
   try {
     const teamMembers = await Member.find({}).lean();
 
-    // Priority sorting: Executives top tier first, then Directors, Leads, Coordinators
-    const getRolePriority = (role) => {
-      const r = (role || '').toLowerCase();
+    // Priority sorting: Mentors ordered deterministically, then Executives top tier, Directors, Leads, Coordinators
+    const getMentorOrder = (m) => {
+      const uid = String(m.employeeId || m.universityId || m.id || '').trim();
+      const orderMap = {
+        '1513': 1,
+        '4242': 2,
+        '7367': 3,
+        '6276': 4,
+        '7998': 5,
+      };
+      return orderMap[uid] || 10;
+    };
+
+    const getRolePriority = (m) => {
+      const r = (m.role || '').toLowerCase();
+      if (m.category === 'MENTOR' || r.includes('mentor') || r.includes('crt') || r.includes('hod')) {
+        return getMentorOrder(m);
+      }
       if (r.includes('president') && !r.includes('vice')) return 1;
       if (r.includes('vice president')) return 2;
       if (r.includes('secretary') && !r.includes('joint')) return 3;
@@ -2279,7 +2294,7 @@ app.get('/api/team', async (req, res) => {
       return 50;
     };
 
-    teamMembers.sort((a, b) => getRolePriority(a.role) - getRolePriority(b.role));
+    teamMembers.sort((a, b) => getRolePriority(a) - getRolePriority(b));
     res.json(teamMembers);
   } catch (err) {
     console.error('Error fetching team:', err);
@@ -2294,6 +2309,7 @@ app.get('/api/team/:id', async (req, res) => {
         { id: req.params.id },
         { _id: mongoose.Types.ObjectId.isValid(req.params.id) ? req.params.id : null },
         { universityId: req.params.id },
+        { employeeId: req.params.id },
       ],
     }).lean();
     if (!member) return res.status(404).json({ error: 'Member not found' });
